@@ -4,18 +4,27 @@ on:
   push:
     branches:
       - master
+  pull_request:
+    branches:
+      - master
   workflow_dispatch:
 
 jobs:
-  test-build:
+  rust:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y webkit2gtk-4.1 libxdo-dev libayatana-appindicator3-dev
 
       - name: Set up Rust toolchain
         uses: actions-rs/toolchain@v1
@@ -25,3 +34,24 @@ jobs:
 
       - name: Check build on ${{ matrix.os }}
         run: cargo check --all-targets
+
+      - name: Run Rust tests on ${{ matrix.os }}
+        run: cargo test --lib
+
+  javascript:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build JavaScript package
+        run: npm run build

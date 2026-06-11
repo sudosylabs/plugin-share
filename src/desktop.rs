@@ -18,6 +18,12 @@ impl<R: Runtime> Share<R> {
         options: ShareOptions,
         state: State<'_, PluginTempFileManager>,
     ) -> Result<()> {
+        if !options.has_shareable_content() {
+            return Err(crate::Error::InvalidArgs(
+                "No content provided to share.".to_string(),
+            ));
+        }
+
         platform::share(window, options, state)
     }
 
@@ -26,7 +32,9 @@ impl<R: Runtime> Share<R> {
     }
 
     pub fn cleanup(&self) -> Result<()> {
-        self.0.state::<PluginTempFileManager>().cleanup_all_managed_files();
+        self.0
+            .state::<PluginTempFileManager>()
+            .cleanup_all_managed_files();
         platform::cleanup()
     }
 }

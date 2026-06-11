@@ -21,9 +21,7 @@ pub fn init<R: Runtime, C: DeserializeOwned>(
     api: PluginApi<R, C>,
 ) -> crate::Result<Share<R>> {
     #[cfg(target_os = "android")]
-    let handle = api
-        .register_android_plugin(PLUGIN_IDENTIFIER, "SharePlugin")
-        .unwrap();
+    let handle = api.register_android_plugin(PLUGIN_IDENTIFIER, "SharePlugin")?;
     #[cfg(target_os = "ios")]
     let handle = api.register_ios_plugin(init_plugin_share)?;
     Ok(Share(handle))
@@ -42,6 +40,12 @@ impl<R: Runtime> Share<R> {
         payload: ShareOptions,
         _state: State<'_, PluginTempFileManager>,
     ) -> Result<()> {
+        if !payload.has_shareable_content() {
+            return Err(crate::Error::InvalidArgs(
+                "No content provided to share.".to_string(),
+            ));
+        }
+
         self.0
             .run_mobile_plugin("share", payload)
             .map_err(Into::into)

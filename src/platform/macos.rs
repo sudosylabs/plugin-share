@@ -1,9 +1,9 @@
-use objc2::Message;
 use crate::models::CanShareResult;
 use crate::state::PluginTempFileManager;
 use crate::{Error, ShareOptions, SharedFile};
 use base64::{engine::general_purpose, Engine as _};
 use objc2::runtime::{AnyObject, ProtocolObject};
+use objc2::Message;
 use objc2::{
     define_class, msg_send,
     rc::{autoreleasepool, Retained},
@@ -15,7 +15,7 @@ use objc2_app_kit::{
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{
-    NSArray, NSError, NSObject, NSObjectProtocol, NSString, NSURL, MainThreadMarker,
+    MainThreadMarker, NSArray, NSError, NSObject, NSObjectProtocol, NSString, NSURL,
 };
 use raw_window_handle::{HasWindowHandle, RawWindowHandle, WindowHandle};
 use std::cell::RefCell;
@@ -67,11 +67,7 @@ define_class!(
 
     unsafe impl NSSharingServiceDelegate for SharePickerDelegate {
         #[unsafe(method(sharingService:didShareItems:))]
-        fn sharing_service_did_share_items(
-            &self,
-            _service: &NSSharingService,
-            _items: &NSArray,
-        ) {
+        fn sharing_service_did_share_items(&self, _service: &NSSharingService, _items: &NSArray) {
             self.complete(Ok(()));
         }
 
@@ -153,14 +149,7 @@ pub fn share<R: Runtime>(
 
             let temp_file_manager_clone = managed_files.clone();
 
-            let combined_text = match (options.text, options.url) {
-                (Some(t), Some(u)) => format!("{}\n{}", t, u),
-                (Some(t), None) => t,
-                (None, Some(u)) => u,
-                (None, None) => String::new(),
-            };
-
-            if !combined_text.is_empty() {
+            if let Some(combined_text) = options.combined_text() {
                 items_to_share
                     .push(unsafe { Retained::cast_unchecked(NSString::from_str(&combined_text)) });
             }

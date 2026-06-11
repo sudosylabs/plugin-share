@@ -24,6 +24,10 @@ export interface ShareData {
   url?: string;
 }
 
+function hasShareableContent(data: ShareData): boolean {
+  return Boolean(data.text || data.url || (data.files && data.files.length > 0));
+}
+
 /**
  * Checks whether the native sharing capability is available for the given data.
  *
@@ -43,6 +47,10 @@ export interface ShareData {
  * @returns Promise resolving to `true` if sharing is possible.
  */
 export async function canShare(data?: ShareData): Promise<boolean> {
+  if (data && !hasShareableContent(data)) {
+    return false;
+  }
+
   const result = (await invoke("plugin:vnidrop-share|can_share")) as {
     value: any;
   };
@@ -108,6 +116,10 @@ async function fileToBase64(file: File): Promise<string> {
  * @returns Promise resolving when the share dialog is closed.
  */
 export async function share(data: ShareData): Promise<void> {
+  if (!hasShareableContent(data)) {
+    throw new TypeError("No content provided to share.");
+  }
+
   const payload: any = {
     text: data.text,
     title: data.title,

@@ -1,13 +1,13 @@
+use super::focus;
 use crate::state::PluginTempFileManager;
 use crate::{CanShareResult, Error, ShareOptions, SharedFile};
 use base64::{engine::general_purpose, Engine as _};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::cell::RefCell;
-use std::fs::File;
+use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
-use super::focus;
 use tauri::{Runtime, State, Window};
 use windows::ApplicationModel::DataTransfer::{DataRequestedEventArgs, DataTransferManager};
 use windows::Foundation::Uri;
@@ -128,7 +128,7 @@ pub fn share<R: Runtime>(
                             let data_clone = data.clone();
 
                             tauri::async_runtime::spawn({
-                                let files = files.clone(); 
+                                let files = files.clone();
                                 let managed_files_arc_for_async = managed_files_arc_clone_for_handler.clone();
                                 async move {
                                     let mut storage_items: Vec<IStorageItem> = Vec::new();
@@ -150,9 +150,9 @@ pub fn share<R: Runtime>(
                                                             if let Ok(item) = storage_file.cast() {
                                                                 storage_items.push(item);
                                                             }
-                                                        }, 
+                                                        },
                                                         Err(e) => eprintln!("Failed to get storage file: {}", e),
-                                                    }, 
+                                                    },
                                                     Err(e) => eprintln!("Failed to get file from path: {}", e),
                                                 }
                                             },
@@ -163,7 +163,7 @@ pub fn share<R: Runtime>(
                                     if !storage_items.is_empty() {
                                         let options_items = storage_items.into_iter().map(Some).collect::<Vec<_>>();
                                         let iterable_items: Result<IIterable<IStorageItem>, _> = options_items.try_into();
-                                        
+
                                         match iterable_items {
                                             Ok(items) => {
                                                 if let Err(e) = data_clone.SetStorageItemsReadOnly(&items) {
@@ -193,7 +193,7 @@ pub fn share<R: Runtime>(
             });
 
             let token = dtm.DataRequested(&data_requested_handler)?;
-            
+
             SHARE_STATE.with(|state| {
                 *state.borrow_mut() = Some((dtm, token));
             });
@@ -283,12 +283,14 @@ fn create_temp_file_for_data(file: &SharedFile) -> Result<PathBuf, Error> {
         .ok_or_else(|| Error::InvalidArgs("File name contains invalid UTF-8".to_string()))?;
 
     let temp_dir = get_plugin_temp_dir()?;
-    let temp_path = temp_dir.join(sanitized_name);
+    let temp_path = temp_dir.join(format!("{}-{}", uuid::Uuid::new_v4(), sanitized_name));
 
-    let mut file_handle = File::create(&temp_path)
+    let mut file_handle = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp_path)
         .map_err(|e| Error::TempFile(format!("Failed to create temp file: {}", e)))?;
 
-    // For now we will keep the real file name, we may introduce a way allow the end dev decide later.
     file_handle
         .write_all(&decoded_bytes)
         .map_err(|e| Error::TempFile(format!("Failed to write to temp file: {}", e)))?;

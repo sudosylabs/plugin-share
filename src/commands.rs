@@ -27,6 +27,12 @@ pub async fn share<R: Runtime>(
     options: models::ShareOptions,
     state: State<'_, PluginTempFileManager>,
 ) -> Result<(), error::Error> {
+    if !options.has_shareable_content() {
+        return Err(error::Error::InvalidArgs(
+            "No content provided to share.".to_string(),
+        ));
+    }
+
     app.share().share(window, options, state)
 }
 

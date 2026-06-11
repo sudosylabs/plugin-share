@@ -23,6 +23,7 @@ func initPlugin() -> Plugin {
 public class SharePlugin: Plugin {
 
     private var temporaryFileURLs: [URL] = []
+    private var shareInProgress = false
 
     @objc func canShare(_ invoke: Invoke) throws {
         // The native share sheet is always available on iOS.
@@ -34,11 +35,17 @@ public class SharePlugin: Plugin {
      * This is a manual cleanup utility for the developer.
      */
     @objc func cleanup(_ invoke: Invoke) {
+        if shareInProgress {
+            invoke.reject("Cannot cleanup while sharing is in progress.")
+            return
+        }
+
         do {
             let shareDir = try getSafeShareDir()
             if FileManager.default.fileExists(atPath: shareDir.path) {
                 try FileManager.default.removeItem(at: shareDir)
             }
+            temporaryFileURLs.removeAll()
             invoke.resolve()
         } catch {
             invoke.reject("Error during cleanup: \(error.localizedDescription)")
@@ -46,8 +53,15 @@ public class SharePlugin: Plugin {
     }
 
     @objc func share(_ invoke: Invoke) throws {
+        if shareInProgress {
+            invoke.reject("Share already in progress.")
+            return
+        }
+
         let args = try invoke.parseArgs(ShareOptions.self)
         var activityItems: [Any] = []
+        var createdFileURLs: [URL] = []
+        shareInProgress = true
 
         if let urlString = args.url, let url = URL(string: urlString) {
             activityItems.append(url)
@@ -59,6 +73,8 @@ public class SharePlugin: Plugin {
         if let files = args.files {
             for file in files {
                 guard let decodedData = Data(base64Encoded: file.data) else {
+                    cleanupTemporaryFiles(createdFileURLs)
+                    _ = resetShareState()
                     invoke.reject("Invalid Base64 data for file: \(file.name)")
                     return
                 }
@@ -67,8 +83,10 @@ public class SharePlugin: Plugin {
                     let tempFileURL = try createSafeTempFile(for: file.name)
                     try decodedData.write(to: tempFileURL, options:.atomic)
                     activityItems.append(tempFileURL)
-                    temporaryFileURLs.append(tempFileURL)
+                    createdFileURLs.append(tempFileURL)
                 } catch {
+                    cleanupTemporaryFiles(createdFileURLs)
+                    _ = resetShareState()
                     invoke.reject("Failed to create temporary file: \(error.localizedDescription)")
                     return
                 }
@@ -76,10 +94,12 @@ public class SharePlugin: Plugin {
         }
 
         if activityItems.isEmpty {
+            _ = resetShareState()
             invoke.reject("No content provided to share.")
             return
         }
 
+        temporaryFileURLs.append(contentsOf: createdFileURLs)
         presentShareSheet(invoke: invoke, activityItems: activityItems)
     }
     
@@ -118,19 +138,30 @@ public class SharePlugin: Plugin {
     private func presentShareSheet(invoke: Invoke, activityItems: [Any]) {
         DispatchQueue.main.async {
             guard let viewController = self.manager.viewController else {
+                _ = self.resetShareState()
                 invoke.reject("Could not find root view controller.")
+                return
+            }
+
+            guard viewController.presentedViewController == nil else {
+                let filesToClean = self.resetShareState()
+                self.cleanupTemporaryFiles(filesToClean)
+                invoke.reject("Another view controller is already being presented.")
                 return
             }
 
             let activityViewController = UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
             
             activityViewController.completionWithItemsHandler = { _, _, _, error in
-                self.cleanupTemporaryFiles()
-                
-                if let anError = error {
-                    invoke.reject("Sharing failed: \(anError.localizedDescription)")
-                } else {
-                    invoke.resolve()
+                DispatchQueue.main.async {
+                    let filesToClean = self.resetShareState()
+                    self.cleanupTemporaryFiles(filesToClean)
+
+                    if let anError = error {
+                        invoke.reject("Sharing failed: \(anError.localizedDescription)")
+                    } else {
+                        invoke.resolve()
+                    }
                 }
             }
 
@@ -145,12 +176,18 @@ public class SharePlugin: Plugin {
         }
     }
 
-    private func cleanupTemporaryFiles() {
+    private func resetShareState() -> [URL] {
+        let filesToClean = temporaryFileURLs
+        temporaryFileURLs.removeAll()
+        shareInProgress = false
+        return filesToClean
+    }
+
+    private func cleanupTemporaryFiles(_ urls: [URL]) {
         DispatchQueue.global(qos:.utility).async {
-            for url in self.temporaryFileURLs {
+            for url in urls {
                 try? FileManager.default.removeItem(at: url)
             }
-            self.temporaryFileURLs.removeAll()
         }
     }
 }

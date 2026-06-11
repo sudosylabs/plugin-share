@@ -4,6 +4,8 @@ import android.app.Activity
 import android.content.ClipData
 import android.content.Intent
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.util.Base64
 import java.io.File
 import java.io.FileOutputStream
@@ -37,6 +39,12 @@ class SharePlugin(private val activity: Activity): Plugin(activity) {
     private var pendingShareInvoke: Invoke? = null
     private var shareInProgress = false
     private var awaitingShareResume = false
+    private var pendingCleanupFiles: List<File> = emptyList()
+    private val cleanupHandler = Handler(Looper.getMainLooper())
+
+    companion object {
+        private const val CLEANUP_DELAY_MS = 5 * 60 * 1000L
+    }
 
     @Command
     fun canShare(invoke: Invoke) {
@@ -54,6 +62,7 @@ class SharePlugin(private val activity: Activity): Plugin(activity) {
             return
         }
 
+        val filesForShare = ArrayList<File>()
         try {
             val args = invoke.parseArgs(ShareOptions::class.java)
             val fileUris = ArrayList<Uri>()
@@ -67,6 +76,7 @@ class SharePlugin(private val activity: Activity): Plugin(activity) {
                         FileOutputStream(tempFile).use { outputStream ->
                             outputStream.write(decodedBytes)
                         }
+                        filesForShare.add(tempFile)
 
                         val authority = "${activity.packageName}.fileprovider"
                         fileUris.add(
@@ -78,6 +88,11 @@ class SharePlugin(private val activity: Activity): Plugin(activity) {
                 }
             }
 
+            if (fileUris.isEmpty() && args.text.isNullOrEmpty() && args.url.isNullOrEmpty()) {
+                invoke.reject("No content provided to share.")
+                return
+            }
+
             val shareIntent = Intent()
             if (fileUris.isNotEmpty()) {
                 shareIntent.action = if (fileUris.size > 1) Intent.ACTION_SEND_MULTIPLE else Intent.ACTION_SEND
@@ -87,14 +102,14 @@ class SharePlugin(private val activity: Activity): Plugin(activity) {
                     shareIntent.putExtra(Intent.EXTRA_STREAM, fileUris[0])
                 }
 
-                shareIntent.clipData = ClipData.newUri(activity.contentResolver, "Shared Files", fileUris[0])
+                shareIntent.clipData = createShareClipData(fileUris)
             } else {
                 shareIntent.action = Intent.ACTION_SEND
             }
 
             shareIntent.type = determinedMimeType
 
-            val combinedText = args.url ?: args.text
+            val combinedText = combineTextAndUrl(args.text, args.url)
             if (combinedText != null) {
                 shareIntent.putExtra(Intent.EXTRA_TEXT, combinedText)
             }
@@ -108,8 +123,10 @@ class SharePlugin(private val activity: Activity): Plugin(activity) {
             pendingShareInvoke = invoke
             shareInProgress = true
             awaitingShareResume = false
+            pendingCleanupFiles = filesForShare
             activity.startActivity(chooser)
         } catch (e: Exception) {
+            cleanupFiles(filesForShare)
             resetPendingShare()
             invoke.reject("Failed to share content: ${e.message}", e)
         }
@@ -126,7 +143,9 @@ class SharePlugin(private val activity: Activity): Plugin(activity) {
         super.onResume()
         if (shareInProgress && awaitingShareResume) {
             val invoke = pendingShareInvoke
+            val filesToClean = pendingCleanupFiles
             resetPendingShare()
+            scheduleCleanup(filesToClean)
             invoke?.resolve()
         }
     }
@@ -165,10 +184,51 @@ class SharePlugin(private val activity: Activity): Plugin(activity) {
         return "*/*"
     }
 
+    private fun createShareClipData(fileUris: List<Uri>): ClipData {
+        val clipData = ClipData.newUri(activity.contentResolver, "Shared Files", fileUris.first())
+        fileUris.drop(1).forEach { uri ->
+            clipData.addItem(ClipData.Item(uri))
+        }
+        return clipData
+    }
+
+    private fun combineTextAndUrl(text: String?, url: String?): String? {
+        val hasText = !text.isNullOrEmpty()
+        val hasUrl = !url.isNullOrEmpty()
+
+        return when {
+            hasText && hasUrl -> "$text\n$url"
+            hasText -> text
+            hasUrl -> url
+            else -> null
+        }
+    }
+
     private fun resetPendingShare() {
         pendingShareInvoke = null
         shareInProgress = false
         awaitingShareResume = false
+        pendingCleanupFiles = emptyList()
+    }
+
+    private fun scheduleCleanup(files: List<File>) {
+        if (files.isEmpty()) return
+
+        cleanupHandler.postDelayed({
+            cleanupFiles(files)
+        }, CLEANUP_DELAY_MS)
+    }
+
+    private fun cleanupFiles(files: List<File>) {
+        files.forEach { file ->
+            try {
+                if (file.exists()) {
+                    file.delete()
+                }
+            } catch (_: Exception) {
+                // Best-effort cleanup only.
+            }
+        }
     }
 
     /**

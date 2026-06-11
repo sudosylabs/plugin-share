@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    mpsc,
-    Arc, Mutex, OnceLock,
+    mpsc, Arc, Mutex, OnceLock,
 };
 use std::time::Duration;
 
