@@ -1,10 +1,10 @@
 name: "Publish Plugin Packages"
 
-# This workflow is triggered only when a new tag matching the pattern 'v*.*.*' is pushed.
+# This workflow is triggered when a semver tag is pushed, including prerelease tags like v1.0.0-rc.
 on:
   push:
     tags:
-      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v*.*.*"
 
 jobs:
   publish-crate-dry-run:
