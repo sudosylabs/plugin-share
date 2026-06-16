@@ -20,7 +20,7 @@ Add the plugin to your `Cargo.toml`:
 
 ```sh
 [dependencies]
-tauri-plugin-vnidrop-share = "0.2.2"
+tauri-plugin-vnidrop-share = "1.0.0-rc"
 ```
 
 ### Frontend
