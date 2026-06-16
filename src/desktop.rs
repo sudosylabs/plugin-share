@@ -23,6 +23,7 @@ impl<R: Runtime> Share<R> {
                 "No content provided to share.".to_string(),
             ));
         }
+        options.validate()?;
 
         platform::share(window, options, state)
     }

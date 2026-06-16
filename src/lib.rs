@@ -19,7 +19,7 @@
 //!
 //! You need to initialize the plugin in your `main.rs` or `lib.rs` to register the commands and set up state management.
 //!
-//! ```rust
+//! ```rust,ignore
 //! // src/main.rs
 //! fn main() {
 //!     tauri::Builder::default()

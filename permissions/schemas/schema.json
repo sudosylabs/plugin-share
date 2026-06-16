@@ -331,10 +331,10 @@
           "markdownDescription": "Denies the share command without any pre-configured scope."
         },
         {
-          "description": "Default permissions for the Vnidrop Plugin, all commands can be invoked by default.\n#### This default permission set includes:\n\n- `allow-share`\n- `allow-can-share`\n- `allow-cleanup`",
+          "description": "Default permissions for the Vnidrop Plugin, excluding maintenance cleanup by default.\n#### This default permission set includes:\n\n- `allow-share`\n- `allow-can-share`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Default permissions for the Vnidrop Plugin, all commands can be invoked by default.\n#### This default permission set includes:\n\n- `allow-share`\n- `allow-can-share`\n- `allow-cleanup`"
+          "markdownDescription": "Default permissions for the Vnidrop Plugin, excluding maintenance cleanup by default.\n#### This default permission set includes:\n\n- `allow-share`\n- `allow-can-share`"
         }
       ]
     }

@@ -1,6 +1,6 @@
 use super::focus;
 use crate::state::PluginTempFileManager;
-use crate::{CanShareResult, Error, ShareOptions, SharedFile};
+use crate::{CanShareResult, Error, ShareOptions, SharedFile, MAX_FILE_BYTES};
 use base64::{engine::general_purpose, Engine as _};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::cell::RefCell;
@@ -273,6 +273,12 @@ fn create_temp_file_for_data(file: &SharedFile) -> Result<PathBuf, Error> {
     let decoded_bytes = general_purpose::STANDARD
         .decode(&file.data)
         .map_err(|_| Error::InvalidArgs("Invalid Base64 data provided".to_string()))?;
+    if decoded_bytes.len() > MAX_FILE_BYTES {
+        return Err(Error::InvalidArgs(format!(
+            "File '{}' exceeds the maximum size of {} bytes.",
+            file.name, MAX_FILE_BYTES
+        )));
+    }
 
     // Security: Sanitize the filename to prevent path traversal attacks.
     // We only use the filename part and ignore any directory structure.

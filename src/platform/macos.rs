@@ -1,6 +1,6 @@
 use crate::models::CanShareResult;
 use crate::state::PluginTempFileManager;
-use crate::{Error, ShareOptions, SharedFile};
+use crate::{Error, ShareOptions, SharedFile, MAX_FILE_BYTES};
 use base64::{engine::general_purpose, Engine as _};
 use objc2::runtime::{AnyObject, ProtocolObject};
 use objc2::Message;
@@ -257,6 +257,12 @@ fn create_temp_file_for_data(options: &SharedFile) -> Result<NamedTempFile, Erro
     let decoded_bytes = general_purpose::STANDARD
         .decode(&options.data)
         .map_err(|_| Error::InvalidArgs("Invalid Base64 data.".to_string()))?;
+    if decoded_bytes.len() > MAX_FILE_BYTES {
+        return Err(Error::InvalidArgs(format!(
+            "File '{}' exceeds the maximum size of {} bytes.",
+            options.name, MAX_FILE_BYTES
+        )));
+    }
     // Security: Sanitize the filename to prevent path traversal attacks.
     let sanitized_name = Path::new(&options.name)
         .file_name()

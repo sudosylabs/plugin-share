@@ -1,19 +1,8 @@
+#if canImport(UIKit)
 import Tauri
+import ShareCore
 import UIKit
 import WebKit
-
-struct SharedFile: Decodable {
-    let data: String
-    let name: String
-    let mimeType: String
-}
-
-struct ShareOptions: Decodable {
-    var text: String?
-    var title: String?
-    var url: String?
-    var files: [SharedFile]?
-}
 
 @_cdecl("init_plugin_share") 
 func initPlugin() -> Plugin {
@@ -59,11 +48,16 @@ public class SharePlugin: Plugin {
         }
 
         let args = try invoke.parseArgs(ShareOptions.self)
+        if let validationError = validateShareOptions(args) {
+            invoke.reject(validationError)
+            return
+        }
+
         var activityItems: [Any] = []
         var createdFileURLs: [URL] = []
         shareInProgress = true
 
-        if let urlString = args.url, let url = URL(string: urlString) {
+        if let urlString = args.url, !urlString.isEmpty, let url = URL(string: urlString) {
             activityItems.append(url)
         }
         if let text = args.text {
@@ -76,6 +70,12 @@ public class SharePlugin: Plugin {
                     cleanupTemporaryFiles(createdFileURLs)
                     _ = resetShareState()
                     invoke.reject("Invalid Base64 data for file: \(file.name)")
+                    return
+                }
+                if decodedData.count > maxFileBytes {
+                    cleanupTemporaryFiles(createdFileURLs)
+                    _ = resetShareState()
+                    invoke.reject("File '\(file.name)' exceeds the maximum size of \(maxFileBytes) bytes.")
                     return
                 }
                 
@@ -129,6 +129,9 @@ public class SharePlugin: Plugin {
         let safeDir = try getSafeShareDir()
         
         let sanitizedBaseName = URL(fileURLWithPath: untrustedFileName).lastPathComponent
+        if sanitizedBaseName.isEmpty {
+            throw NSError(domain: "SharePlugin", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid filename: sanitized name is empty."])
+        }
         
         let finalFileName = "\(UUID().uuidString)-\(sanitizedBaseName)"
         
@@ -191,3 +194,4 @@ public class SharePlugin: Plugin {
         }
     }
 }
+#endif

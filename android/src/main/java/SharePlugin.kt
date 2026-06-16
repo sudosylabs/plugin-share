@@ -65,6 +65,7 @@ class SharePlugin(private val activity: Activity): Plugin(activity) {
         val filesForShare = ArrayList<File>()
         try {
             val args = invoke.parseArgs(ShareOptions::class.java)
+            ShareValidation.validateShareOptions(args)
             val fileUris = ArrayList<Uri>()
             var determinedMimeType = "text/plain"
 
@@ -72,6 +73,7 @@ class SharePlugin(private val activity: Activity): Plugin(activity) {
                 if (it.isNotEmpty()) {
                     for (file in it) {
                         val decodedBytes = Base64.decode(file.data, Base64.DEFAULT)
+                        ShareValidation.validateDecodedFileSize(file, decodedBytes.size)
                         val tempFile = createSafeFile(file.name)
                         FileOutputStream(tempFile).use { outputStream ->
                             outputStream.write(decodedBytes)
@@ -256,11 +258,11 @@ class SharePlugin(private val activity: Activity): Plugin(activity) {
         // A robust approach is to allow only a whitelist of characters.
         // Here, we also add a UUID to prevent name collisions.
         val sanitizedBaseName = untrustedFileName.replace(Regex("[^a-zA-Z0-9._-]"), "")
-        val finalFileName = "${UUID.randomUUID()}-${sanitizedBaseName}"
-
-        if (finalFileName.isEmpty()) {
+        if (sanitizedBaseName.isEmpty()) {
             throw SecurityException("Invalid filename: sanitized name is empty.")
         }
+
+        val finalFileName = "${UUID.randomUUID()}-${sanitizedBaseName}"
 
         val intendedFile = File(safeDir, finalFileName)
 

@@ -1,5 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 
+const MAX_FILES = 16;
+const MAX_FILE_BYTES = 50 * 1024 * 1024;
+const MAX_TOTAL_FILE_BYTES = 100 * 1024 * 1024;
+const MAX_TEXT_BYTES = 64 * 1024;
+const MAX_TITLE_BYTES = 1024;
+const MAX_URL_BYTES = 4096;
+const MAX_FILE_NAME_BYTES = 255;
+const MAX_MIME_TYPE_BYTES = 255;
+
 /**
  * Represents the content to be shared, similar to the Web Share API's ShareData dictionary.
  *
@@ -28,6 +37,93 @@ function hasShareableContent(data: ShareData): boolean {
   return Boolean(data.text || data.url || (data.files && data.files.length > 0));
 }
 
+function byteLength(value: string): number {
+  return new TextEncoder().encode(value).length;
+}
+
+function validateWebUrl(url: string): boolean {
+  if (url.trim() !== url || /[\s\u0000-\u001f\u007f]/u.test(url)) {
+    return false;
+  }
+  const schemeSeparator = url.indexOf("://");
+  if (schemeSeparator === -1) {
+    return false;
+  }
+  const authority = url
+    .slice(schemeSeparator + 3)
+    .split(/[/?#]/u, 1)[0]
+    .split("@")
+    .pop() ?? "";
+  if (!authority || authority.startsWith(":")) {
+    return false;
+  }
+  try {
+    const parsedUrl = new URL(url);
+    return (
+      (parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:") &&
+      parsedUrl.host.length > 0
+    );
+  } catch {
+    return false;
+  }
+}
+
+function validateShareData(data: ShareData): void {
+  if (data.text && byteLength(data.text) > MAX_TEXT_BYTES) {
+    throw new TypeError(`text exceeds the maximum length of ${MAX_TEXT_BYTES} bytes.`);
+  }
+  if (data.title && byteLength(data.title) > MAX_TITLE_BYTES) {
+    throw new TypeError(`title exceeds the maximum length of ${MAX_TITLE_BYTES} bytes.`);
+  }
+  if (data.url !== undefined) {
+    if (byteLength(data.url) > MAX_URL_BYTES) {
+      throw new TypeError(`url exceeds the maximum length of ${MAX_URL_BYTES} bytes.`);
+    }
+    if (data.url.length > 0 && !validateWebUrl(data.url)) {
+      throw new TypeError("Only http:// and https:// URLs can be shared as URLs.");
+    }
+  }
+
+  if (!data.files || data.files.length === 0) {
+    return;
+  }
+
+  if (data.files.length > MAX_FILES) {
+    throw new TypeError(`Too many files provided. Maximum is ${MAX_FILES}.`);
+  }
+
+  const totalBytes = data.files.reduce((total, file) => total + file.size, 0);
+  if (totalBytes > MAX_TOTAL_FILE_BYTES) {
+    throw new TypeError(
+      `Total shared file size exceeds the maximum of ${MAX_TOTAL_FILE_BYTES} bytes.`
+    );
+  }
+
+  const oversizedFile = data.files.find((file) => file.size > MAX_FILE_BYTES);
+  if (oversizedFile) {
+    throw new TypeError(
+      `File '${oversizedFile.name}' exceeds the maximum size of ${MAX_FILE_BYTES} bytes.`
+    );
+  }
+
+  const oversizedName = data.files.find((file) => byteLength(file.name) > MAX_FILE_NAME_BYTES);
+  if (oversizedName) {
+    throw new TypeError(
+      `File name exceeds the maximum length of ${MAX_FILE_NAME_BYTES} bytes.`
+    );
+  }
+
+  const oversizedMimeType = data.files.find((file) => {
+    const type = file.type || "application/octet-stream";
+    return byteLength(type) > MAX_MIME_TYPE_BYTES;
+  });
+  if (oversizedMimeType) {
+    throw new TypeError(
+      `mime type exceeds the maximum length of ${MAX_MIME_TYPE_BYTES} bytes.`
+    );
+  }
+}
+
 /**
  * Checks whether the native sharing capability is available for the given data.
  *
@@ -49,6 +145,13 @@ function hasShareableContent(data: ShareData): boolean {
 export async function canShare(data?: ShareData): Promise<boolean> {
   if (data && !hasShareableContent(data)) {
     return false;
+  }
+  if (data) {
+    try {
+      validateShareData(data);
+    } catch {
+      return false;
+    }
   }
 
   const result = (await invoke("plugin:vnidrop-share|can_share")) as {
@@ -119,6 +222,7 @@ export async function share(data: ShareData): Promise<void> {
   if (!hasShareableContent(data)) {
     throw new TypeError("No content provided to share.");
   }
+  validateShareData(data);
 
   const payload: any = {
     text: data.text,
