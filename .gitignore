@@ -5,6 +5,7 @@
 .idea/
 debug.log
 package-lock.json
+!examples/tauri-app/package-lock.json
 .vscode/settings.json
 yarn.lock
 
@@ -15,3 +16,10 @@ node_modules/
 
 dist-js
 dist
+
+android/.gradle/
+android/**/build/
+examples/tauri-app/node_modules/
+examples/tauri-app/dist/
+examples/tauri-app/src-tauri/gen/
+examples/tauri-app/src-tauri/target/
