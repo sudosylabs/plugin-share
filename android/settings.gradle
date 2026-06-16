@@ -8,10 +8,10 @@ pluginManagement {
         eachPlugin {
             switch (requested.id.id) {
                 case "com.android.library":
-                    useVersion("8.0.2")
+                    useVersion("8.13.2")
                     break
                 case "org.jetbrains.kotlin.android":
-                    useVersion("1.8.20")
+                    useVersion("2.2.21")
                     break
             }
         }
@@ -28,4 +28,7 @@ dependencyResolutionManagement {
 }
 
 include ':tauri-android'
-project(':tauri-android').projectDir = new File('./.tauri/tauri-api')
+def generatedTauriApi = new File('./.tauri/tauri-api')
+project(':tauri-android').projectDir = generatedTauriApi.exists()
+        ? generatedTauriApi
+        : new File('./test-support/tauri-api')

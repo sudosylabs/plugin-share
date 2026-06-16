@@ -32,6 +32,7 @@ pub async fn share<R: Runtime>(
             "No content provided to share.".to_string(),
         ));
     }
+    options.validate()?;
 
     app.share().share(window, options, state)
 }

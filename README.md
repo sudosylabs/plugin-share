@@ -10,6 +10,8 @@ The web's native [Web Share API](https://developer.mozilla.org/en-US/docs/Web/AP
 
 For file sharing, the plugin intelligently manages the lifecycle of temporary files. It creates secure temporary files from Base64 data, ensuring they persist for the duration of the sharing operation, and automatically cleans them up when the application exits. On mobile platforms like Android and iOS, the native sharing APIs are directly invoked, and temporary files are managed and cleaned up within the native code. Android file cleanup is delayed briefly after the app resumes so receiving apps have time to open granted file URIs.
 
+For release safety, share payloads are bounded on both the JavaScript and native sides. URLs must be well-formed `http://` or `https://` URLs; other schemes should be shared as plain text instead. A single share request may include up to 16 files, each file may be up to 50 MiB, and the total file payload may be up to 100 MiB. Text is limited to 64 KiB, titles to 1 KiB, URLs to 4 KiB, and file names/MIME types to 255 bytes.
+
 ## Installation
 
 ### Rust
@@ -18,7 +20,7 @@ Add the plugin to your `Cargo.toml`:
 
 ```sh
 [dependencies]
-tauri-plugin-vnidrop-share = "0.2.2"
+tauri-plugin-vnidrop-share = "1.0.0-rc"
 ```
 
 ### Frontend
@@ -93,7 +95,7 @@ The frontend API is designed to closely resemble the Web Share API, making it in
 
 3. Manual Cleanup
 
-   While the plugin automatically handles cleanup when the app exits, you can manually call `cleanup()` to remove temporary files after a share operation is complete to free up disk space. Avoid calling `cleanup()` while a share sheet is still open.
+   While the plugin automatically handles cleanup when the app exits, you can manually call `cleanup()` to remove temporary files after a share operation is complete to free up disk space. Avoid calling `cleanup()` while a share sheet is still open. The `cleanup` command is not included in the default permission set; enable `vnidrop-share:allow-cleanup` explicitly if your app calls it from the frontend.
 
    ```ts
    import { cleanup } from "@vnidrop/tauri-plugin-share";
@@ -115,8 +117,24 @@ The frontend API is designed to closely resemble the Web Share API, making it in
         .plugin(tauri_plugin_vnidrop_share::init())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-    }
+   }
    ```
+
+### Android troubleshooting
+
+If Android reports `vnidrop-share.can_share not allowed. Plugin not found`, the APK does not have the share plugin registered in Tauri's runtime/ACL. Verify that your app calls:
+
+```rs
+.plugin(tauri_plugin_vnidrop_share::init())
+```
+
+and that the active capability includes the plugin permission:
+
+```json
+"vnidrop-share:default"
+```
+
+After changing plugin permissions or native Android code, fully rebuild and reinstall the Android app. A stale installed APK can keep showing this error even after the source code is corrected.
 
 2. **Using the `ShareExt` Trait**
 
@@ -141,3 +159,18 @@ The frontend API is designed to closely resemble the Web Share API, making it in
     Ok(())
     }
    ```
+
+## Testing
+
+The repository includes Rust, JavaScript, Android JVM, iOS Swift, and example-app checks:
+
+```sh
+bun run build
+bun run test
+bun run test:types
+cargo test
+cd android && gradle testDebugUnitTest
+cd ios && VNIDROP_SHARE_USE_TAURI_STUB=1 swift test
+cd examples/tauri-app && npm install && npm run build && npm audit
+cd examples/tauri-app/src-tauri && cargo check
+```

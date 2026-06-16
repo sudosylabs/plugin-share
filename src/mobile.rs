@@ -45,6 +45,7 @@ impl<R: Runtime> Share<R> {
                 "No content provided to share.".to_string(),
             ));
         }
+        payload.validate()?;
 
         self.0
             .run_mobile_plugin("share", payload)
