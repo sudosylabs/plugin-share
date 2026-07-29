@@ -9,7 +9,9 @@ import android.os.Looper
 import android.util.Base64
 import java.io.File
 import java.io.FileOutputStream
+import androidx.activity.result.ActivityResult
 import androidx.core.content.FileProvider
+import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
@@ -37,9 +39,8 @@ class ShareOptions {
 @TauriPlugin
 class SharePlugin(private val activity: Activity): Plugin(activity) {
     private var pendingShareInvoke: Invoke? = null
-    private var shareInProgress = false
-    private var awaitingShareResume = false
     private var pendingCleanupFiles: List<File> = emptyList()
+    private val shareSession = ShareSessionState()
     private val cleanupHandler = Handler(Looper.getMainLooper())
 
     companion object {
@@ -57,7 +58,7 @@ class SharePlugin(private val activity: Activity): Plugin(activity) {
 
     @Command
     fun share(invoke: Invoke) {
-        if (shareInProgress) {
+        if (shareSession.isInProgress) {
             invoke.reject("Share already in progress.")
             return
         }
@@ -111,22 +112,22 @@ class SharePlugin(private val activity: Activity): Plugin(activity) {
 
             shareIntent.type = determinedMimeType
 
-            val combinedText = combineTextAndUrl(args.text, args.url)
-            if (combinedText != null) {
-                shareIntent.putExtra(Intent.EXTRA_TEXT, combinedText)
+            val payload = ShareIntentPayload.from(args)
+            payload.body?.let {
+                shareIntent.putExtra(Intent.EXTRA_TEXT, it)
             }
-            if (args.title != null) {
-                shareIntent.putExtra(Intent.EXTRA_TITLE, args.title)
+            payload.title?.let {
+                shareIntent.putExtra(Intent.EXTRA_TITLE, it)
+                shareIntent.putExtra(Intent.EXTRA_SUBJECT, it)
             }
 
             shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            val chooser = Intent.createChooser(shareIntent, args.title)
+            val chooser = Intent.createChooser(shareIntent, payload.title)
 
             pendingShareInvoke = invoke
-            shareInProgress = true
-            awaitingShareResume = false
             pendingCleanupFiles = filesForShare
-            activity.startActivity(chooser)
+            shareSession.start()
+            startActivityForResult(invoke, chooser, "shareResult")
         } catch (e: Exception) {
             cleanupFiles(filesForShare)
             resetPendingShare()
@@ -136,19 +137,20 @@ class SharePlugin(private val activity: Activity): Plugin(activity) {
 
     override fun onPause() {
         super.onPause()
-        if (shareInProgress) {
-            awaitingShareResume = true
-        }
+        shareSession.markPaused()
     }
 
     override fun onResume() {
         super.onResume()
-        if (shareInProgress && awaitingShareResume) {
-            val invoke = pendingShareInvoke
-            val filesToClean = pendingCleanupFiles
-            resetPendingShare()
-            scheduleCleanup(filesToClean)
-            invoke?.resolve()
+        if (shareSession.completeFromResume()) {
+            resolvePendingShare()
+        }
+    }
+
+    @ActivityCallback
+    fun shareResult(invoke: Invoke, result: ActivityResult) {
+        if (shareSession.completeFromActivityResult()) {
+            resolvePendingShare(invoke)
         }
     }
 
@@ -194,23 +196,18 @@ class SharePlugin(private val activity: Activity): Plugin(activity) {
         return clipData
     }
 
-    private fun combineTextAndUrl(text: String?, url: String?): String? {
-        val hasText = !text.isNullOrEmpty()
-        val hasUrl = !url.isNullOrEmpty()
-
-        return when {
-            hasText && hasUrl -> "$text\n$url"
-            hasText -> text
-            hasUrl -> url
-            else -> null
-        }
+    private fun resolvePendingShare(invoke: Invoke? = pendingShareInvoke) {
+        val filesToClean = pendingCleanupFiles
+        pendingShareInvoke = null
+        pendingCleanupFiles = emptyList()
+        scheduleCleanup(filesToClean)
+        invoke?.resolve()
     }
 
     private fun resetPendingShare() {
         pendingShareInvoke = null
-        shareInProgress = false
-        awaitingShareResume = false
         pendingCleanupFiles = emptyList()
+        shareSession.reset()
     }
 
     private fun scheduleCleanup(files: List<File>) {
