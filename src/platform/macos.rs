@@ -202,18 +202,33 @@ pub fn share<R: Runtime>(
                 unsafe { picker.setDelegate(Some(ProtocolObject::from_ref(&*delegate))) };
 
                 let bounds = ns_view.bounds();
+                // Web-viewport coordinates are top-left origin; AppKit bounds use a bottom-left origin.
+                // Flip the y-axis so the anchor rect describes the same visual area in NSView space.
+                let rect = options.anchor.map_or(
+                    CGRect {
+                        origin: CGPoint {
+                            x: bounds.size.width / 2.0,
+                            y: bounds.size.height / 2.0,
+                        },
+                        size: CGSize {
+                            width: 0.0,
+                            height: 0.0,
+                        },
+                    },
+                    |anchor| CGRect {
+                        origin: CGPoint {
+                            x: anchor.x,
+                            y: bounds.size.height - anchor.y - anchor.height,
+                        },
+                        size: CGSize {
+                            width: anchor.width,
+                            height: anchor.height,
+                        },
+                    },
+                );
                 unsafe {
                     picker.showRelativeToRect_ofView_preferredEdge(
-                        CGRect {
-                            origin: CGPoint {
-                                x: bounds.size.width / 2.0,
-                                y: bounds.size.height / 2.0,
-                            },
-                            size: CGSize {
-                                width: 0.0,
-                                height: 0.0,
-                            },
-                        },
+                        rect,
                         &ns_view,
                         objc2_foundation::NSRectEdge::NSMinYEdge,
                     );

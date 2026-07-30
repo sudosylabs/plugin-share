@@ -1,4 +1,5 @@
 import Foundation
+import WebKit
 
 public typealias JsonObject = [String: Any?]
 
@@ -8,6 +9,8 @@ open class Plugin: NSObject {
     public required override init() {
         super.init()
     }
+
+    @objc open func load(webview: WKWebView) {}
 }
 
 open class PluginManager: NSObject {

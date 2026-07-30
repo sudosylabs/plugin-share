@@ -74,6 +74,26 @@ describe('share guest API', () => {
 		})
 	})
 
+	it('passes an anchor option to the native share command', async () => {
+		const { share } = await import('../../guest-js/index')
+
+		await share({
+			title: 'Greeting',
+			text: 'Share this',
+			url: 'https://example.com',
+			anchor: { x: 10, y: 20, width: 120, height: 44 },
+		})
+
+		expect(tauriCoreMock.invoke).toHaveBeenCalledWith('plugin:vnidrop-share|share', {
+			options: {
+				title: 'Greeting',
+				text: 'Share this',
+				url: 'https://example.com',
+				anchor: { x: 10, y: 20, width: 120, height: 44 },
+			},
+		})
+	})
+
 	it('rejects non-web url schemes in the url field', async () => {
 		const { share } = await import('../../guest-js/index')
 

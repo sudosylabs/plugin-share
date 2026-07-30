@@ -11,6 +11,16 @@ pub const MAX_URL_BYTES: usize = 4096;
 pub const MAX_FILE_NAME_BYTES: usize = 255;
 pub const MAX_MIME_TYPE_BYTES: usize = 255;
 
+/// Represents a rectangle in web-viewport coordinates used to anchor a share popover.
+#[derive(Debug, Deserialize, Serialize, Clone, Copy)]
+#[serde(rename_all = "camelCase")]
+pub struct ShareAnchor {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
 /// Represents a file to be shared, including its content, name, and MIME type.
 ///
 /// The `data` field holds the Base64 encoded content of the file. This approach
@@ -65,6 +75,8 @@ pub struct ShareOptions {
     pub url: Option<String>,
     /// A list of files to share, each represented by a `SharedFile` struct.
     pub files: Option<Vec<SharedFile>>,
+    /// Optional source rectangle used to anchor the share popover on iPadOS and macOS.
+    pub anchor: Option<ShareAnchor>,
 }
 
 impl ShareOptions {
@@ -232,6 +244,7 @@ mod tests {
             title: None,
             url: url.map(ToString::to_string),
             files,
+            anchor: None,
         }
     }
 
@@ -301,6 +314,7 @@ mod tests {
             title: None,
             url: None,
             files: None,
+            anchor: None,
         }
         .validate()
         .is_err());

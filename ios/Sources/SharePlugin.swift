@@ -11,8 +11,13 @@ func initPlugin() -> Plugin {
 
 public class SharePlugin: Plugin {
 
+    private var webview: WKWebView?
     private var temporaryFileURLs: [URL] = []
     private var shareInProgress = false
+
+    open override func load(webview: WKWebView) {
+        self.webview = webview
+    }
 
     @objc func canShare(_ invoke: Invoke) throws {
         // The native share sheet is always available on iOS.
@@ -100,7 +105,7 @@ public class SharePlugin: Plugin {
         }
 
         temporaryFileURLs.append(contentsOf: createdFileURLs)
-        presentShareSheet(invoke: invoke, activityItems: activityItems)
+        presentShareSheet(invoke: invoke, activityItems: activityItems, anchor: args.anchor)
     }
     
     /**
@@ -138,7 +143,7 @@ public class SharePlugin: Plugin {
         return safeDir.appendingPathComponent(finalFileName)
     }
 
-    private func presentShareSheet(invoke: Invoke, activityItems: [Any]) {
+    private func presentShareSheet(invoke: Invoke, activityItems: [Any], anchor: ShareAnchor? = nil) {
         DispatchQueue.main.async {
             guard let viewController = self.manager.viewController else {
                 _ = self.resetShareState()
@@ -170,9 +175,26 @@ public class SharePlugin: Plugin {
 
             // iPad presentation logic
             if let popoverController = activityViewController.popoverPresentationController {
-                popoverController.sourceView = viewController.view
-                popoverController.sourceRect = CGRect(x: viewController.view.bounds.midX, y: viewController.view.bounds.midY, width: 0, height: 0)
-                popoverController.permittedArrowDirections = []
+                guard let sourceView = self.webview ?? viewController.view else {
+                    let filesToClean = self.resetShareState()
+                    self.cleanupTemporaryFiles(filesToClean)
+                    invoke.reject("Could not find a source view for the share popover.")
+                    return
+                }
+                popoverController.sourceView = sourceView
+
+                if let anchor = anchor {
+                    popoverController.sourceRect = CGRect(
+                        x: anchor.x,
+                        y: anchor.y,
+                        width: anchor.width,
+                        height: anchor.height
+                    )
+                    popoverController.permittedArrowDirections = [.up, .down]
+                } else {
+                    popoverController.sourceRect = CGRect(x: sourceView.bounds.midX, y: sourceView.bounds.midY, width: 0, height: 0)
+                    popoverController.permittedArrowDirections = []
+                }
             }
 
             viewController.present(activityViewController, animated: true, completion: nil)
