@@ -159,6 +159,9 @@ public class SharePlugin: Plugin {
             }
 
             let activityViewController = UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+            if UIDevice.current.userInterfaceIdiom == .pad {
+                activityViewController.modalPresentationStyle = .popover
+            }
             
             activityViewController.completionWithItemsHandler = { _, _, _, error in
                 DispatchQueue.main.async {
