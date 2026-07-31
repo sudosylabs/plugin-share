@@ -22,6 +22,13 @@ const MAX_MIME_TYPE_BYTES = 255;
  * };
  * ```
  */
+export interface ShareRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface ShareData {
   /** Optional array of File objects to share (e.g., images, PDFs). */
   files?: File[];
@@ -31,6 +38,11 @@ export interface ShareData {
   title?: string;
   /** Optional URL to be shared. */
   url?: string;
+  /**
+   * Optional source rectangle for iPadOS and macOS popovers, in web-viewport
+   * coordinates (pixels from the top-left).
+   */
+  anchor?: ShareRect;
 }
 
 function hasShareableContent(data: ShareData): boolean {
@@ -238,6 +250,10 @@ export async function share(data: ShareData): Promise<void> {
         mimeType: file.type || "application/octet-stream",
       }))
     );
+  }
+
+  if (data.anchor) {
+    payload.anchor = data.anchor;
   }
 
   await invoke("plugin:vnidrop-share|share", { options: payload });

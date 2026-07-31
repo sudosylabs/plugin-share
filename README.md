@@ -76,6 +76,23 @@ The frontend API is designed to closely resemble the Web Share API, making it in
      }
    }
 
+   // Share with an anchor (iPadOS and macOS only)
+   async function shareFromButton(button: HTMLElement) {
+     const rect = button.getBoundingClientRect();
+     if (await canShare()) {
+       await share({
+         title: "My Project",
+         url: "https://github.com/vnidrop/plugin-share",
+         anchor: {
+           x: rect.left,
+           y: rect.top,
+           width: rect.width,
+           height: rect.height,
+         },
+       });
+     }
+   }
+
    // Share a file (e.g., an image)
    async function shareFile() {
      const fileInput = document.querySelector(
@@ -152,6 +169,7 @@ After changing plugin permissions or native Android code, fully rebuild and rein
         title: Some("Rust Share".to_string()),
         url: None,
         files: None,
+        anchor: None,
     };
 
     // Use the extension trait to access the plugin's API

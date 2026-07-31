@@ -22,6 +22,14 @@ import java.io.IOException
 import java.util.UUID
 
 @InvokeArg
+class Anchor {
+    var x: Double? = null
+    var y: Double? = null
+    var width: Double? = null
+    var height: Double? = null
+}
+
+@InvokeArg
 class SharedFile {
     lateinit var data: String
     lateinit var name: String
@@ -34,6 +42,7 @@ class ShareOptions {
     var title: String? = null
     var url: String? = null
     var files: List<SharedFile>? = null
+    var anchor: Anchor? = null
 }
 
 @TauriPlugin
