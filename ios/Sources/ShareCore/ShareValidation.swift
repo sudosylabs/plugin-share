@@ -8,6 +8,7 @@ public let maxTitleBytes = 1024
 public let maxURLBytes = 4096
 public let maxFileNameBytes = 255
 public let maxMimeTypeBytes = 255
+public let maxFilePathBytes = 4096
 
 public func validateShareOptions(_ args: ShareOptions) -> String? {
     if let error = validateStringLength("text", args.text, maxBytes: maxTextBytes) {
@@ -26,32 +27,39 @@ public func validateShareOptions(_ args: ShareOptions) -> String? {
         }
     }
 
-    guard let files = args.files else {
-        return nil
-    }
-
-    if files.count > maxFiles {
+    let fileCount = (args.files ?? []).count + (args.filePaths ?? []).count
+    if fileCount > maxFiles {
         return "Too many files provided. Maximum is \(maxFiles)."
     }
 
     var totalEstimatedBytes = 0
-    for file in files {
-        if let error = validateStringLength("file name", file.name, maxBytes: maxFileNameBytes) {
-            return error
-        }
-        if let error = validateStringLength("mime type", file.mimeType, maxBytes: maxMimeTypeBytes) {
-            return error
-        }
+    if let files = args.files {
+        for file in files {
+            if let error = validateStringLength("file name", file.name, maxBytes: maxFileNameBytes) {
+                return error
+            }
+            if let error = validateStringLength("mime type", file.mimeType, maxBytes: maxMimeTypeBytes) {
+                return error
+            }
 
-        guard let estimatedBytes = estimateBase64DecodedSize(file.data) else {
-            return "Invalid Base64 data."
+            guard let estimatedBytes = estimateBase64DecodedSize(file.data) else {
+                return "Invalid Base64 data."
+            }
+            if estimatedBytes > maxFileBytes {
+                return "File '\(file.name)' exceeds the maximum size of \(maxFileBytes) bytes."
+            }
+            totalEstimatedBytes += estimatedBytes
+            if totalEstimatedBytes > maxTotalFileBytes {
+                return "Total shared file size exceeds the maximum of \(maxTotalFileBytes) bytes."
+            }
         }
-        if estimatedBytes > maxFileBytes {
-            return "File '\(file.name)' exceeds the maximum size of \(maxFileBytes) bytes."
-        }
-        totalEstimatedBytes += estimatedBytes
-        if totalEstimatedBytes > maxTotalFileBytes {
-            return "Total shared file size exceeds the maximum of \(maxTotalFileBytes) bytes."
+    }
+
+    if let filePaths = args.filePaths {
+        for path in filePaths {
+            if let error = validateStringLength("file path", path, maxBytes: maxFilePathBytes) {
+                return error
+            }
         }
     }
 

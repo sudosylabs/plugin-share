@@ -33,6 +33,7 @@ thread_local! {
 #[derive(Default)]
 struct ShareDelegateIvars {
     completion: RefCell<Option<mpsc::Sender<Result<(), Error>>>>,
+    subject: RefCell<Option<Retained<NSString>>>,
 }
 
 define_class!(
@@ -48,8 +49,11 @@ define_class!(
         fn sharing_service_picker_delegate_for_sharing_service(
             &self,
             _picker: &NSSharingServicePicker,
-            _service: &NSSharingService,
+            service: &NSSharingService,
         ) -> Option<Retained<ProtocolObject<dyn NSSharingServiceDelegate>>> {
+            if let Some(subject) = self.ivars().subject.borrow().as_ref() {
+                service.setSubject(Some(&**subject));
+            }
             Some(ProtocolObject::from_retained(self.retain()))
         }
 
@@ -90,9 +94,14 @@ define_class!(
 );
 
 impl SharePickerDelegate {
-    fn new(mtm: MainThreadMarker, completion: mpsc::Sender<Result<(), Error>>) -> Retained<Self> {
+    fn new(
+        mtm: MainThreadMarker,
+        completion: mpsc::Sender<Result<(), Error>>,
+        subject: Option<Retained<NSString>>,
+    ) -> Retained<Self> {
         let ivars = ShareDelegateIvars {
             completion: RefCell::new(Some(completion)),
+            subject: RefCell::new(subject),
         };
         let this = Self::alloc(mtm).set_ivars(ivars);
         unsafe { msg_send![super(this), init] }
@@ -149,9 +158,24 @@ pub fn share<R: Runtime>(
 
             let temp_file_manager_clone = managed_files.clone();
 
+            let has_files = options.files.as_ref().is_some_and(|f| !f.is_empty())
+                || options.file_paths.as_ref().is_some_and(|p| !p.is_empty());
+
+            let subject = if has_files {
+                options
+                    .title
+                    .as_ref()
+                    .or(options.text.as_ref())
+                    .map(|s| NSString::from_str(s))
+            } else {
+                None
+            };
+
             if let Some(combined_text) = options.combined_text() {
-                items_to_share
-                    .push(unsafe { Retained::cast_unchecked(NSString::from_str(&combined_text)) });
+                if !has_files {
+                    items_to_share
+                        .push(unsafe { Retained::cast_unchecked(NSString::from_str(&combined_text)) });
+                }
             }
 
             if let Some(files) = options.files {
@@ -177,6 +201,15 @@ pub fn share<R: Runtime>(
                 }
             }
 
+            // Share local files directly from their original paths. This preserves the
+            // original filename and avoids creating temporary copies.
+            if let Some(file_paths) = options.file_paths {
+                for path in file_paths {
+                    let url = NSURL::fileURLWithPath(&NSString::from_str(&path));
+                    items_to_share.push(unsafe { Retained::cast_unchecked(url) });
+                }
+            }
+
             if items_to_share.is_empty() {
                 return Err(Error::InvalidArgs(
                     "No content provided to share.".to_string(),
@@ -197,7 +230,7 @@ pub fn share<R: Runtime>(
                 };
 
                 let mtm = MainThreadMarker::new().expect("Main thread marker");
-                let delegate = SharePickerDelegate::new(mtm, completion_tx);
+                let delegate = SharePickerDelegate::new(mtm, completion_tx, subject);
                 ACTIVE_DELEGATES.with(|delegates| delegates.borrow_mut().push(delegate.retain()));
                 unsafe { picker.setDelegate(Some(ProtocolObject::from_ref(&*delegate))) };
 

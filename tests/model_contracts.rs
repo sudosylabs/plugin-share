@@ -13,6 +13,7 @@ fn public_model_validation_accepts_local_file_bytes_without_url() {
             name: "hello.txt".to_string(),
             mime_type: "text/plain".to_string(),
         }]),
+        file_paths: None,
         anchor: None,
     };
 
@@ -34,6 +35,7 @@ fn public_model_validation_rejects_non_web_url_schemes() {
             title: None,
             url: Some(url.to_string()),
             files: None,
+            file_paths: None,
             anchor: None,
         }
         .validate()
@@ -49,6 +51,7 @@ fn public_model_validation_enforces_limits() {
         title: None,
         url: None,
         files: None,
+        file_paths: None,
         anchor: None,
     }
     .validate()
@@ -60,6 +63,7 @@ fn public_model_validation_enforces_limits() {
         title: None,
         url: Some(oversized_url),
         files: None,
+        file_paths: None,
         anchor: None,
     }
     .validate()
@@ -77,6 +81,7 @@ fn public_model_validation_enforces_limits() {
         title: None,
         url: None,
         files: Some(files),
+        file_paths: None,
         anchor: None,
     }
     .validate()
@@ -91,6 +96,7 @@ fn public_model_validation_enforces_limits() {
             name: "a".repeat(MAX_FILE_NAME_BYTES + 1),
             mime_type: "text/plain".to_string(),
         }]),
+        file_paths: None,
         anchor: None,
     }
     .validate()

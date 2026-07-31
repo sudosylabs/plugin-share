@@ -19,6 +19,7 @@ import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import java.io.IOException
+import java.net.URLConnection
 import java.util.UUID
 
 @InvokeArg
@@ -42,6 +43,8 @@ class ShareOptions {
     var title: String? = null
     var url: String? = null
     var files: List<SharedFile>? = null
+    /** A list of local file paths to share directly from disk, preserving the original filename. */
+    var filePaths: List<String>? = null
     var anchor: Anchor? = null
 }
 
@@ -77,7 +80,8 @@ class SharePlugin(private val activity: Activity): Plugin(activity) {
             val args = invoke.parseArgs(ShareOptions::class.java)
             ShareValidation.validateShareOptions(args)
             val fileUris = ArrayList<Uri>()
-            var determinedMimeType = "text/plain"
+            val mimeTypes = ArrayList<String>()
+            val authority = "${activity.packageName}.fileprovider"
 
             args.files?.let {
                 if (it.isNotEmpty()) {
@@ -90,14 +94,36 @@ class SharePlugin(private val activity: Activity): Plugin(activity) {
                         }
                         filesForShare.add(tempFile)
 
-                        val authority = "${activity.packageName}.fileprovider"
                         fileUris.add(
                             FileProvider.getUriForFile(activity, authority, tempFile)
                         )
+                        mimeTypes.add(file.mimeType)
                     }
-
-                    determinedMimeType = determineMimeType(it)
                 }
+            }
+
+            args.filePaths?.let {
+                if (it.isNotEmpty()) {
+                    for (path in it) {
+                        val file = File(path)
+                        if (!file.exists() || !file.isFile) {
+                            throw SecurityException("File does not exist or is not a regular file: $path")
+                        }
+
+                        fileUris.add(
+                            FileProvider.getUriForFile(activity, authority, file)
+                        )
+                        mimeTypes.add(
+                            URLConnection.guessContentTypeFromName(file.name)
+                                ?: "application/octet-stream"
+                        )
+                    }
+                }
+            }
+
+            var determinedMimeType = "text/plain"
+            if (mimeTypes.isNotEmpty()) {
+                determinedMimeType = determineMimeType(mimeTypes)
             }
 
             if (fileUris.isEmpty() && args.text.isNullOrEmpty() && args.url.isNullOrEmpty()) {
@@ -122,12 +148,17 @@ class SharePlugin(private val activity: Activity): Plugin(activity) {
             shareIntent.type = determinedMimeType
 
             val payload = ShareIntentPayload.from(args)
-            payload.body?.let {
-                shareIntent.putExtra(Intent.EXTRA_TEXT, it)
-            }
-            payload.title?.let {
-                shareIntent.putExtra(Intent.EXTRA_TITLE, it)
-                shareIntent.putExtra(Intent.EXTRA_SUBJECT, it)
+            // Only include text extras for text-only shares. When a file is attached,
+            // EXTRA_TITLE / EXTRA_SUBJECT can be misused by target apps (e.g. Google Drive)
+            // as the filename, and EXTRA_TEXT can shadow the file stream.
+            if (fileUris.isEmpty()) {
+                payload.body?.let {
+                    shareIntent.putExtra(Intent.EXTRA_TEXT, it)
+                }
+                payload.title?.let {
+                    shareIntent.putExtra(Intent.EXTRA_TITLE, it)
+                    shareIntent.putExtra(Intent.EXTRA_SUBJECT, it)
+                }
             }
 
             shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -183,15 +214,15 @@ class SharePlugin(private val activity: Activity): Plugin(activity) {
         }
     }
 
-    private fun determineMimeType(files: List<SharedFile>): String {
-        if (files.isEmpty()) return "*/*"
-        val firstMimeType = files.first().mimeType
+    private fun determineMimeType(mimeTypes: List<String>): String {
+        if (mimeTypes.isEmpty()) return "*/*"
+        val firstMimeType = mimeTypes.first()
         val firstGeneralType = firstMimeType.substringBefore('/')
-        
-        val allSame = files.all { it.mimeType == firstMimeType }
+
+        val allSame = mimeTypes.all { it == firstMimeType }
         if (allSame) return firstMimeType
 
-        val allSameGeneral = files.all { it.mimeType.startsWith(firstGeneralType) }
+        val allSameGeneral = mimeTypes.all { it.startsWith(firstGeneralType) }
         if (allSameGeneral) return "$firstGeneralType/*"
 
         return "*/*"

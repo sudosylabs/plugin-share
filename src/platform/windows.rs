@@ -2,6 +2,7 @@ use super::focus;
 use crate::state::PluginTempFileManager;
 use crate::{CanShareResult, Error, ShareOptions, SharedFile, MAX_FILE_BYTES};
 use base64::{engine::general_purpose, Engine as _};
+use log::{error, warn};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::cell::RefCell;
 use std::fs::OpenOptions;
@@ -18,7 +19,7 @@ use windows::{
     Storage::StorageFile,
     Win32::{
         Foundation::HWND,
-        System::WinRT::{RoInitialize, RO_INIT_SINGLETHREADED},
+        System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED, RO_INIT_SINGLETHREADED},
         UI::Shell::IDataTransferManagerInterop,
     },
 };
@@ -78,9 +79,24 @@ pub fn share<R: Runtime>(
                         let data = request.Data()?;
                         let properties = data.Properties()?;
 
-                        if let Some(title) = &options_clone.title {
-                            properties.SetTitle(&HSTRING::from(title))?;
-                        }
+                        let title = options_clone.title.clone().unwrap_or_else(|| {
+                            options_clone
+                                .file_paths
+                                .as_ref()
+                                .and_then(|paths| paths.first())
+                                .and_then(|path| Path::new(path).file_name())
+                                .map(|name| name.to_string_lossy().into_owned())
+                                .or_else(|| {
+                                    options_clone
+                                        .files
+                                        .as_ref()
+                                        .and_then(|files| files.first())
+                                        .map(|file| file.name.clone())
+                                })
+                                .unwrap_or_else(|| "Shared content".to_string())
+                        });
+
+                        properties.SetTitle(&HSTRING::from(&title))?;
 
                         if let (Some(t), Some(u)) = (&options_clone.text, &options_clone.url) {
                             // Set the plain text content.
@@ -97,7 +113,7 @@ pub fn share<R: Runtime>(
                                 // If the URL string cannot be parsed into a valid Uri object,
                                 // a warning is logged. In such cases, the URL might still be
                                 // valuable as part of the plain text.
-                                eprintln!("Warning: Could not parse URL '{}' for DataPackage::SetWebLink. Setting as part of text.", u);
+                                error!("Warning: Could not parse URL '{}' for DataPackage::SetWebLink. Setting as part of text.", u);
                                 // Optionally, if it's critical for the URL to be present in some form,
                                 // even if not semantically, it could be appended to the plain text.
                                 let combined_text_fallback = format!("{}\n{}", t, u);
@@ -118,19 +134,30 @@ pub fn share<R: Runtime>(
                             } else {
                                 // If URL parsing fails, fall back to setting it as plain text.
                                 // This ensures the URL string is still transferred, even without its semantic type.
-                                eprintln!("Warning: Could not parse URL '{}' for DataPackage::SetWebLink. Setting as plain text.", u);
+                                error!("Warning: Could not parse URL '{}' for DataPackage::SetWebLink. Setting as plain text.", u);
                                 data.SetText(&HSTRING::from(u))?;
                             }
                         }
 
-                        if let Some(files) = &options_clone.files {
+                        if options_clone.files.is_some() || options_clone.file_paths.is_some() {
                             let deferral = request.GetDeferral()?;
                             let data_clone = data.clone();
 
                             tauri::async_runtime::spawn({
-                                let files = files.clone();
+                                let files = options_clone.files.clone().unwrap_or_default();
+                                let file_paths = options_clone.file_paths.clone().unwrap_or_default();
                                 let managed_files_arc_for_async = managed_files_arc_clone_for_handler.clone();
                                 async move {
+                                    // COM/WinRT is initialized on the main thread by initialize_winrt_thread,
+                                    // but the tokio worker pool is not. Mark this thread as a multi-threaded
+                                    // apartment before touching any WinRT objects.
+                                    if let Err(e) = unsafe { RoInitialize(RO_INIT_MULTITHREADED) } {
+                                        warn!(
+                                            "Failed to initialize WinRT on share worker thread: {}. Continuing anyway.",
+                                            e
+                                        );
+                                    }
+
                                     let mut storage_items: Vec<IStorageItem> = Vec::new();
 
                                     for file in files {
@@ -141,7 +168,7 @@ pub fn share<R: Runtime>(
                                                     files.push(path_buf.clone());
                                                     Ok(())
                                                 }) {
-                                                    eprintln!("Failed to update temp file manager: {}", e);
+                                                    error!("Failed to update temp file manager: {}", e);
                                                 }
 
                                                 match StorageFile::GetFileFromPathAsync(&HSTRING::from(path_str)) {
@@ -151,12 +178,26 @@ pub fn share<R: Runtime>(
                                                                 storage_items.push(item);
                                                             }
                                                         },
-                                                        Err(e) => eprintln!("Failed to get storage file: {}", e),
+                                                        Err(e) => error!("Failed to get storage file: {}", e),
                                                     },
-                                                    Err(e) => eprintln!("Failed to get file from path: {}", e),
+                                                    Err(e) => error!("Failed to get file from path: {}", e),
                                                 }
                                             },
-                                            Err(e) => eprintln!("Failed to create temp file: {}", e),
+                                            Err(e) => error!("Failed to create temp file: {}", e),
+                                        }
+                                    }
+
+                                    for path in file_paths {
+                                        match StorageFile::GetFileFromPathAsync(&HSTRING::from(path)) {
+                                            Ok(op) => match op.get() {
+                                                Ok(storage_file) => {
+                                                    if let Ok(item) = storage_file.cast() {
+                                                        storage_items.push(item);
+                                                    }
+                                                },
+                                                Err(e) => error!("Failed to get storage file: {}", e),
+                                            },
+                                            Err(e) => error!("Failed to get file from path: {}", e),
                                         }
                                     }
 
@@ -167,11 +208,11 @@ pub fn share<R: Runtime>(
                                         match iterable_items {
                                             Ok(items) => {
                                                 if let Err(e) = data_clone.SetStorageItemsReadOnly(&items) {
-                                                    println!("Failed to set storage items on data package: {}", e);
+                                                    error!("Failed to set storage items on data package: {}", e);
                                                 }
                                             },
                                             Err(e) => {
-                                                println!("Failed to convert Vec to IIterable: {}", e);
+                                                error!("Failed to convert Vec to IIterable: {}", e);
                                             }
                                         }
                                     }
