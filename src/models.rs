@@ -89,7 +89,10 @@ impl ShareOptions {
         self.text.as_ref().is_some_and(|value| !value.is_empty())
             || self.url.as_ref().is_some_and(|value| !value.is_empty())
             || self.files.as_ref().is_some_and(|files| !files.is_empty())
-            || self.file_paths.as_ref().is_some_and(|paths| !paths.is_empty())
+            || self
+                .file_paths
+                .as_ref()
+                .is_some_and(|paths| !paths.is_empty())
     }
 
     /// Combines text and URL for platforms that expose one plain-text field.

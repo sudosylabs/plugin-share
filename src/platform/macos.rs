@@ -173,8 +173,9 @@ pub fn share<R: Runtime>(
 
             if let Some(combined_text) = options.combined_text() {
                 if !has_files {
-                    items_to_share
-                        .push(unsafe { Retained::cast_unchecked(NSString::from_str(&combined_text)) });
+                    items_to_share.push(unsafe {
+                        Retained::cast_unchecked(NSString::from_str(&combined_text))
+                    });
                 }
             }
 
@@ -196,7 +197,7 @@ pub fn share<R: Runtime>(
                             Ok(())
                         })
                     {
-                        eprintln!("Failed to add file to managed list: {}", e);
+                        log::error!("Failed to add file to managed list: {}", e);
                     }
                 }
             }
