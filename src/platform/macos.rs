@@ -171,10 +171,16 @@ pub fn share<R: Runtime>(
                 None
             };
 
-            if let Some(combined_text) = options.combined_text() {
-                if !has_files {
+            if !has_files {
+                if let Some(url) = options.url.as_deref().filter(|value| !value.is_empty()) {
+                    if let Some(url_obj) = unsafe { NSURL::URLWithString(&NSString::from_str(url)) } {
+                        items_to_share.push(unsafe { Retained::cast_unchecked(url_obj) });
+                    }
+                }
+
+                if let Some(text) = options.text.as_deref().filter(|value| !value.is_empty()) {
                     items_to_share.push(unsafe {
-                        Retained::cast_unchecked(NSString::from_str(&combined_text))
+                        Retained::cast_unchecked(NSString::from_str(text))
                     });
                 }
             }
