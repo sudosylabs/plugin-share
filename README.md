@@ -58,7 +58,7 @@ The frontend API is designed to closely resemble the Web Share API, making it in
 
 2. **Sharing Content**
 
-   Use the `share()` function with a `ShareData` object to trigger the native dialog. The `files` field requires an array of `File` objects, which the plugin automatically handles by converting them to Base64 and managing their lifecycle in the backend. For content that already exists on disk, use `filePaths` to share the file directly while preserving its original filename. At least one of `text`, `url`, a non-empty `files` array, or a non-empty `filePaths` array must be provided.
+   Use the `share()` function with a `ShareData` object to trigger the native dialog. The `files` field requires an array of `File` objects, which the plugin automatically handles by converting them to Base64 and managing their lifecycle in the backend. For content that already exists on disk, use `filePaths` to share the file directly while preserving its original filename. On Android, paths inside a configured `FileProvider` root are shared as-is; paths outside a declared root are copied to the plugin's cache share directory and cleaned up automatically. At least one of `text`, `url`, a non-empty `files` array, or a non-empty `filePaths` array must be provided.
    Note: on Android and Windows, the promise resolves when the app regains focus after the share UI closes (best-effort). On macOS, the share delegate is used to resolve when the share completes. On iOS, the promise is resolved using the native completion handler (`UIActivityViewController.completionWithItemsHandler`), which provides accurate resolution when sharing completes. We may expose a configuration option in the future to let developers choose the resolution behavior (immediate vs. on-focus vs. delayed).
 
    ```ts
@@ -162,6 +162,26 @@ and that the active capability includes the plugin permission:
 ```
 
 After changing plugin permissions or native Android code, fully rebuild and reinstall the Android app. A stale installed APK can keep showing this error even after the source code is corrected.
+
+#### FileProvider and `filePaths`
+
+The plugin registers a `FileProvider` with authority `<your-application-id>.fileprovider`. By default it only exposes the plugin's own cache directory (`cache/shares/`) for temporary files.
+
+If you want `filePaths` to share files directly from your app's directories (without making a temporary copy), add those directories to your app's `file_paths.xml` resource. In a default Tauri v2 project this is `src-tauri/gen/android/app/src/main/res/xml/file_paths.xml`; the `xml` directory and file may need to be created, and the exact path changes if you have customized `TAURI_ANDROID_PROJECT_PATH`. The plugin will try to use the original file first and only copy it if the path is not under a declared `FileProvider` root.
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Keep a cache-path so the plugin can still share its temporary files -->
+    <cache-path name="plugin_cache" path="shares/" />
+    <files-path name="movies" path="data/movies" />
+    <files-path name="music" path="data/music" />
+</paths>
+```
+
+Make sure your custom `file_paths.xml` still contains a `cache-path` entry (for example `path="."` or `path="shares/"`) so that files created from the `files` array and fallback copies remain accessible.
+
+If a `filePath` is outside any declared root, the plugin copies it to its cache share directory, shares the copy, and cleans it up automatically.
 
 2. **Using the `ShareExt` Trait**
 

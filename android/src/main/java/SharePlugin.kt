@@ -110,11 +110,23 @@ class SharePlugin(private val activity: Activity): Plugin(activity) {
                             throw SecurityException("File does not exist or is not a regular file: $path")
                         }
 
-                        fileUris.add(
+                        // Prefer sharing directly through the caller's FileProvider.
+                        // If the file is outside a declared root, copy it to the plugin's
+                        // cache share directory and share from there.
+                        val shareFile = try {
                             FileProvider.getUriForFile(activity, authority, file)
+                            file
+                        } catch (e: IllegalArgumentException) {
+                            val safeFile = copyToSafeShareDir(file)
+                            filesForShare.add(safeFile)
+                            safeFile
+                        }
+
+                        fileUris.add(
+                            FileProvider.getUriForFile(activity, authority, shareFile)
                         )
                         mimeTypes.add(
-                            URLConnection.guessContentTypeFromName(file.name)
+                            URLConnection.guessContentTypeFromName(shareFile.name)
                                 ?: "application/octet-stream"
                         )
                     }
@@ -148,17 +160,12 @@ class SharePlugin(private val activity: Activity): Plugin(activity) {
             shareIntent.type = determinedMimeType
 
             val payload = ShareIntentPayload.from(args)
-            // Only include text extras for text-only shares. When a file is attached,
-            // EXTRA_TITLE / EXTRA_SUBJECT can be misused by target apps (e.g. Google Drive)
-            // as the filename, and EXTRA_TEXT can shadow the file stream.
-            if (fileUris.isEmpty()) {
-                payload.body?.let {
-                    shareIntent.putExtra(Intent.EXTRA_TEXT, it)
-                }
-                payload.title?.let {
-                    shareIntent.putExtra(Intent.EXTRA_TITLE, it)
-                    shareIntent.putExtra(Intent.EXTRA_SUBJECT, it)
-                }
+            payload.body?.let {
+                shareIntent.putExtra(Intent.EXTRA_TEXT, it)
+            }
+            payload.title?.let {
+                shareIntent.putExtra(Intent.EXTRA_TITLE, it)
+                shareIntent.putExtra(Intent.EXTRA_SUBJECT, it)
             }
 
             shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -310,5 +317,35 @@ class SharePlugin(private val activity: Activity): Plugin(activity) {
         }
 
         return intendedFile
+    }
+
+    /**
+     * Copies an existing file into the dedicated share directory in the app's cache.
+     * A unique subdirectory is used so the original filename is preserved while
+     * avoiding name collisions, and the app's FileProvider (which only exposes
+     * cache/shares/) can grant URIs for the copy.
+     */
+    @Throws(IOException::class, SecurityException::class)
+    private fun copyToSafeShareDir(source: File): File {
+        val safeDir = getSafeShareDir()
+        val safeDirCanonicalPath = safeDir.canonicalPath
+
+        // Use a unique subdirectory for each copied file to avoid collisions
+        // and to keep the original filename intact for target apps.
+        val uniqueDir = File(safeDir, UUID.randomUUID().toString())
+        if (!uniqueDir.mkdirs()) {
+            throw IOException("Failed to create share subdirectory.")
+        }
+
+        val dest = File(uniqueDir, source.name)
+
+        // CRITICAL: Path Traversal Check
+        // Ensure the final resolved path is still inside our secure directory.
+        if (!dest.canonicalPath.startsWith(safeDirCanonicalPath + File.separator)) {
+            throw SecurityException("Path Traversal Attack Detected. Malicious filename: '${source.name}'")
+        }
+
+        source.copyTo(dest, overwrite = true)
+        return dest
     }
 }
