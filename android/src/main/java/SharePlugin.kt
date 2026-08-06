@@ -19,6 +19,7 @@ import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import java.io.IOException
+import java.net.URLConnection
 import java.util.UUID
 
 @InvokeArg
@@ -42,6 +43,8 @@ class ShareOptions {
     var title: String? = null
     var url: String? = null
     var files: List<SharedFile>? = null
+    /** A list of local file paths to share directly from disk, preserving the original filename. */
+    var filePaths: List<String>? = null
     var anchor: Anchor? = null
 }
 
@@ -77,7 +80,8 @@ class SharePlugin(private val activity: Activity): Plugin(activity) {
             val args = invoke.parseArgs(ShareOptions::class.java)
             ShareValidation.validateShareOptions(args)
             val fileUris = ArrayList<Uri>()
-            var determinedMimeType = "text/plain"
+            val mimeTypes = ArrayList<String>()
+            val authority = "${activity.packageName}.fileprovider"
 
             args.files?.let {
                 if (it.isNotEmpty()) {
@@ -90,14 +94,48 @@ class SharePlugin(private val activity: Activity): Plugin(activity) {
                         }
                         filesForShare.add(tempFile)
 
-                        val authority = "${activity.packageName}.fileprovider"
                         fileUris.add(
                             FileProvider.getUriForFile(activity, authority, tempFile)
                         )
+                        mimeTypes.add(file.mimeType)
                     }
-
-                    determinedMimeType = determineMimeType(it)
                 }
+            }
+
+            args.filePaths?.let {
+                if (it.isNotEmpty()) {
+                    for (path in it) {
+                        val file = File(path)
+                        if (!file.exists() || !file.isFile) {
+                            throw SecurityException("File does not exist or is not a regular file: $path")
+                        }
+
+                        // Prefer sharing directly through the caller's FileProvider.
+                        // If the file is outside a declared root, copy it to the plugin's
+                        // cache share directory and share from there.
+                        val shareFile = try {
+                            FileProvider.getUriForFile(activity, authority, file)
+                            file
+                        } catch (e: IllegalArgumentException) {
+                            val safeFile = copyToSafeShareDir(file)
+                            filesForShare.add(safeFile)
+                            safeFile
+                        }
+
+                        fileUris.add(
+                            FileProvider.getUriForFile(activity, authority, shareFile)
+                        )
+                        mimeTypes.add(
+                            URLConnection.guessContentTypeFromName(shareFile.name)
+                                ?: "application/octet-stream"
+                        )
+                    }
+                }
+            }
+
+            var determinedMimeType = "text/plain"
+            if (mimeTypes.isNotEmpty()) {
+                determinedMimeType = determineMimeType(mimeTypes)
             }
 
             if (fileUris.isEmpty() && args.text.isNullOrEmpty() && args.url.isNullOrEmpty()) {
@@ -183,15 +221,15 @@ class SharePlugin(private val activity: Activity): Plugin(activity) {
         }
     }
 
-    private fun determineMimeType(files: List<SharedFile>): String {
-        if (files.isEmpty()) return "*/*"
-        val firstMimeType = files.first().mimeType
+    private fun determineMimeType(mimeTypes: List<String>): String {
+        if (mimeTypes.isEmpty()) return "*/*"
+        val firstMimeType = mimeTypes.first()
         val firstGeneralType = firstMimeType.substringBefore('/')
-        
-        val allSame = files.all { it.mimeType == firstMimeType }
+
+        val allSame = mimeTypes.all { it == firstMimeType }
         if (allSame) return firstMimeType
 
-        val allSameGeneral = files.all { it.mimeType.startsWith(firstGeneralType) }
+        val allSameGeneral = mimeTypes.all { it.startsWith(firstGeneralType) }
         if (allSameGeneral) return "$firstGeneralType/*"
 
         return "*/*"
@@ -279,5 +317,35 @@ class SharePlugin(private val activity: Activity): Plugin(activity) {
         }
 
         return intendedFile
+    }
+
+    /**
+     * Copies an existing file into the dedicated share directory in the app's cache.
+     * A unique subdirectory is used so the original filename is preserved while
+     * avoiding name collisions, and the app's FileProvider (which only exposes
+     * cache/shares/) can grant URIs for the copy.
+     */
+    @Throws(IOException::class, SecurityException::class)
+    private fun copyToSafeShareDir(source: File): File {
+        val safeDir = getSafeShareDir()
+        val safeDirCanonicalPath = safeDir.canonicalPath
+
+        // Use a unique subdirectory for each copied file to avoid collisions
+        // and to keep the original filename intact for target apps.
+        val uniqueDir = File(safeDir, UUID.randomUUID().toString())
+        if (!uniqueDir.mkdirs()) {
+            throw IOException("Failed to create share subdirectory.")
+        }
+
+        val dest = File(uniqueDir, source.name)
+
+        // CRITICAL: Path Traversal Check
+        // Ensure the final resolved path is still inside our secure directory.
+        if (!dest.canonicalPath.startsWith(safeDirCanonicalPath + File.separator)) {
+            throw SecurityException("Path Traversal Attack Detected. Malicious filename: '${source.name}'")
+        }
+
+        source.copyTo(dest, overwrite = true)
+        return dest
     }
 }

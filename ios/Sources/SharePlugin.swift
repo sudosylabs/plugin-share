@@ -83,7 +83,7 @@ public class SharePlugin: Plugin {
                     invoke.reject("File '\(file.name)' exceeds the maximum size of \(maxFileBytes) bytes.")
                     return
                 }
-                
+
                 do {
                     let tempFileURL = try createSafeTempFile(for: file.name)
                     try decodedData.write(to: tempFileURL, options:.atomic)
@@ -95,6 +95,15 @@ public class SharePlugin: Plugin {
                     invoke.reject("Failed to create temporary file: \(error.localizedDescription)")
                     return
                 }
+            }
+        }
+
+        // Share local files directly from their original paths. This preserves the
+        // original filename and avoids creating temporary copies.
+        if let filePaths = args.filePaths {
+            for path in filePaths {
+                let fileURL = URL(fileURLWithPath: path)
+                activityItems.append(fileURL)
             }
         }
 

@@ -10,6 +10,7 @@ pub const MAX_TITLE_BYTES: usize = 1024;
 pub const MAX_URL_BYTES: usize = 4096;
 pub const MAX_FILE_NAME_BYTES: usize = 255;
 pub const MAX_MIME_TYPE_BYTES: usize = 255;
+pub const MAX_FILE_PATH_BYTES: usize = 4096;
 
 /// Represents a rectangle in web-viewport coordinates used to anchor a share popover.
 #[derive(Debug, Deserialize, Serialize, Clone, Copy)]
@@ -75,6 +76,9 @@ pub struct ShareOptions {
     pub url: Option<String>,
     /// A list of files to share, each represented by a `SharedFile` struct.
     pub files: Option<Vec<SharedFile>>,
+    /// A list of local file paths to share directly from disk, preserving the
+    /// original filename instead of creating a temporary copy from Base64 data.
+    pub file_paths: Option<Vec<String>>,
     /// Optional source rectangle used to anchor the share popover on iPadOS and macOS.
     pub anchor: Option<ShareAnchor>,
 }
@@ -85,6 +89,10 @@ impl ShareOptions {
         self.text.as_ref().is_some_and(|value| !value.is_empty())
             || self.url.as_ref().is_some_and(|value| !value.is_empty())
             || self.files.as_ref().is_some_and(|files| !files.is_empty())
+            || self
+                .file_paths
+                .as_ref()
+                .is_some_and(|paths| !paths.is_empty())
     }
 
     /// Combines text and URL for platforms that expose one plain-text field.
@@ -109,13 +117,15 @@ impl ShareOptions {
             validate_web_url(url)?;
         }
 
-        if let Some(files) = self.files.as_ref() {
-            if files.len() > MAX_FILES {
-                return Err(Error::InvalidArgs(format!(
-                    "Too many files provided. Maximum is {MAX_FILES}."
-                )));
-            }
+        let file_count = self.files.as_ref().map(|f| f.len()).unwrap_or(0)
+            + self.file_paths.as_ref().map(|p| p.len()).unwrap_or(0);
+        if file_count > MAX_FILES {
+            return Err(Error::InvalidArgs(format!(
+                "Too many files provided. Maximum is {MAX_FILES}."
+            )));
+        }
 
+        if let Some(files) = self.files.as_ref() {
             let mut total_estimated_bytes = 0usize;
             for file in files {
                 validate_optional_string("file name", Some(&file.name), MAX_FILE_NAME_BYTES)?;
@@ -140,6 +150,12 @@ impl ShareOptions {
                     "Total shared file size exceeds the maximum of {} bytes.",
                     MAX_TOTAL_FILE_BYTES
                 )));
+            }
+        }
+
+        if let Some(file_paths) = self.file_paths.as_ref() {
+            for path in file_paths {
+                validate_optional_string("file path", Some(path), MAX_FILE_PATH_BYTES)?;
             }
         }
 
@@ -244,6 +260,7 @@ mod tests {
             title: None,
             url: url.map(ToString::to_string),
             files,
+            file_paths: None,
             anchor: None,
         }
     }
@@ -314,6 +331,7 @@ mod tests {
             title: None,
             url: None,
             files: None,
+            file_paths: None,
             anchor: None,
         }
         .validate()

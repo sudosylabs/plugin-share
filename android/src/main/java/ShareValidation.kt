@@ -11,6 +11,7 @@ object ShareValidation {
     const val MAX_URL_BYTES = 4096
     const val MAX_FILE_NAME_BYTES = 255
     const val MAX_MIME_TYPE_BYTES = 255
+    const val MAX_FILE_PATH_BYTES = 4096
 
     @Throws(SecurityException::class)
     fun validateShareOptions(args: ShareOptions) {
@@ -24,8 +25,10 @@ object ShareValidation {
             }
         }
 
-        val files = args.files ?: return
-        if (files.size > MAX_FILES) {
+        val files = args.files ?: emptyList()
+        val filePaths = args.filePaths ?: emptyList()
+        val fileCount = files.size + filePaths.size
+        if (fileCount > MAX_FILES) {
             throw SecurityException("Too many files provided. Maximum is $MAX_FILES.")
         }
 
@@ -42,6 +45,10 @@ object ShareValidation {
             if (totalEstimatedBytes > MAX_TOTAL_FILE_BYTES) {
                 throw SecurityException("Total shared file size exceeds the maximum of $MAX_TOTAL_FILE_BYTES bytes.")
             }
+        }
+
+        for (path in filePaths) {
+            validateStringLength("file path", path, MAX_FILE_PATH_BYTES)
         }
     }
 

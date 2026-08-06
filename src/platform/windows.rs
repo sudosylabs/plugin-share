@@ -2,6 +2,7 @@ use super::focus;
 use crate::state::PluginTempFileManager;
 use crate::{CanShareResult, Error, ShareOptions, SharedFile, MAX_FILE_BYTES};
 use base64::{engine::general_purpose, Engine as _};
+use log::error;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::cell::RefCell;
 use std::fs::OpenOptions;
@@ -9,18 +10,16 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use tauri::{Runtime, State, Window};
-use windows::ApplicationModel::DataTransfer::{DataRequestedEventArgs, DataTransferManager};
-use windows::Foundation::Uri;
-use windows::Storage::IStorageItem;
-use windows::{
-    core::{Interface, HSTRING},
-    Foundation::TypedEventHandler,
-    Storage::StorageFile,
-    Win32::{
-        Foundation::HWND,
-        System::WinRT::{RoInitialize, RO_INIT_SINGLETHREADED},
-        UI::Shell::IDataTransferManagerInterop,
-    },
+use windows::core::{Interface, HSTRING};
+use windows::ApplicationModel::DataTransfer::{
+    DataPackageOperation, DataRequestDeferral, DataRequestedEventArgs, DataTransferManager,
+};
+use windows::Foundation::{TypedEventHandler, Uri};
+use windows::Storage::{IStorageItem, StorageFile};
+use windows::Win32::{
+    Foundation::HWND,
+    System::WinRT::{RoInitialize, RO_INIT_SINGLETHREADED},
+    UI::Shell::IDataTransferManagerInterop,
 };
 use windows_collections::IIterable;
 
@@ -35,6 +34,23 @@ thread_local! {
 impl From<windows::core::Error> for Error {
     fn from(err: windows::core::Error) -> Self {
         Error::NativeApi(err.message().to_string())
+    }
+}
+
+/// Ensures a `DataRequestDeferral` is always completed when the handler scope ends.
+struct DeferralGuard(Option<DataRequestDeferral>);
+
+impl DeferralGuard {
+    fn new(deferral: DataRequestDeferral) -> Self {
+        Self(Some(deferral))
+    }
+}
+
+impl Drop for DeferralGuard {
+    fn drop(&mut self) {
+        if let Some(deferral) = self.0.take() {
+            let _ = deferral.Complete();
+        }
     }
 }
 
@@ -61,26 +77,45 @@ pub fn share<R: Runtime>(
     let win_clone = window.clone();
 
     let managed_files_arc = state.inner().managed_files.clone();
+    let tx_handler = tx.clone();
+
+    let options = options;
 
     if let Err(e) = window.run_on_main_thread(move || {
-        let options_arc = std::sync::Arc::new(options.clone());
+        let tx_for_handler = tx_handler;
         let result = (|| -> Result<(), Error> {
             initialize_winrt_thread()?;
             let hwnd = get_hwnd(&win_clone)?;
             let (dtm, interop) = get_data_transfer_manager(hwnd)?;
 
             let data_requested_handler = TypedEventHandler::new({
-                let options_clone = options_arc.clone();
+                let options_clone = std::sync::Arc::new(options.clone());
                 let managed_files_arc_clone_for_handler = managed_files_arc.clone();
                 move |_, args: windows::core::Ref<'_, DataRequestedEventArgs>| -> windows::core::Result<()> {
-                    if let Some(request_args) = (*args).as_ref() {
+                    let handler_result = (|| -> Result<(), Error> {
+                        let request_args = (*args).as_ref().ok_or_else(|| Error::NativeApi("Missing DataRequestedEventArgs".to_string()))?;
                         let request = request_args.Request()?;
                         let data = request.Data()?;
                         let properties = data.Properties()?;
 
-                        if let Some(title) = &options_clone.title {
-                            properties.SetTitle(&HSTRING::from(title))?;
-                        }
+                        let title = options_clone.title.clone().unwrap_or_else(|| {
+                            options_clone
+                                .file_paths
+                                .as_ref()
+                                .and_then(|paths| paths.first())
+                                .and_then(|path| Path::new(path).file_name())
+                                .map(|name| name.to_string_lossy().into_owned())
+                                .or_else(|| {
+                                    options_clone
+                                        .files
+                                        .as_ref()
+                                        .and_then(|files| files.first())
+                                        .map(|file| file.name.clone())
+                                })
+                                .unwrap_or_else(|| "Shared content".to_string())
+                        });
+
+                        properties.SetTitle(&HSTRING::from(&title))?;
 
                         if let (Some(t), Some(u)) = (&options_clone.text, &options_clone.url) {
                             // Set the plain text content.
@@ -97,7 +132,7 @@ pub fn share<R: Runtime>(
                                 // If the URL string cannot be parsed into a valid Uri object,
                                 // a warning is logged. In such cases, the URL might still be
                                 // valuable as part of the plain text.
-                                eprintln!("Warning: Could not parse URL '{}' for DataPackage::SetWebLink. Setting as part of text.", u);
+                                error!("Warning: Could not parse URL '{}' for DataPackage::SetWebLink. Setting as part of text.", u);
                                 // Optionally, if it's critical for the URL to be present in some form,
                                 // even if not semantically, it could be appended to the plain text.
                                 let combined_text_fallback = format!("{}\n{}", t, u);
@@ -107,7 +142,7 @@ pub fn share<R: Runtime>(
                         }
                         // If only text is provided, simply set the plain text content.
                         else if let Some(t) = &options_clone.text {
-                            if!t.is_empty() {
+                            if !t.is_empty() {
                                 data.SetText(&HSTRING::from(t))?;
                             }
                         }
@@ -118,76 +153,82 @@ pub fn share<R: Runtime>(
                             } else {
                                 // If URL parsing fails, fall back to setting it as plain text.
                                 // This ensures the URL string is still transferred, even without its semantic type.
-                                eprintln!("Warning: Could not parse URL '{}' for DataPackage::SetWebLink. Setting as plain text.", u);
+                                error!("Warning: Could not parse URL '{}' for DataPackage::SetWebLink. Setting as plain text.", u);
                                 data.SetText(&HSTRING::from(u))?;
                             }
                         }
 
-                        if let Some(files) = &options_clone.files {
+                        if options_clone.files.is_some() || options_clone.file_paths.is_some() {
                             let deferral = request.GetDeferral()?;
-                            let data_clone = data.clone();
+                            let _guard = DeferralGuard::new(deferral);
+                            let mut storage_items: Vec<Option<IStorageItem>> = Vec::new();
 
-                            tauri::async_runtime::spawn({
-                                let files = files.clone();
-                                let managed_files_arc_for_async = managed_files_arc_clone_for_handler.clone();
-                                async move {
-                                    let mut storage_items: Vec<IStorageItem> = Vec::new();
+                            if let Some(files) = &options_clone.files {
+                                let temp_dir = get_plugin_temp_dir()?;
+                                for file in files {
+                                    let path_buf = create_temp_file_for_data(file, &temp_dir)?;
+                                    let path_str = path_buf.to_string_lossy().to_string();
+                                    let mut files = managed_files_arc_clone_for_handler
+                                        .lock()
+                                        .map_err(|e| Error::NativeApi(format!("Failed to lock temp file manager: {}", e)))?;
+                                    files.push(path_buf);
 
-                                    for file in files {
-                                        match create_temp_file_for_data(&file) {
-                                            Ok(path_buf) => {
-                                                let path_str = path_buf.to_string_lossy().to_string();
-                                                if let Err(e) = managed_files_arc_for_async.lock().map_err(|e| format!("Failed to lock mutex: {}", e)).and_then(|mut files| {
-                                                    files.push(path_buf.clone());
-                                                    Ok(())
-                                                }) {
-                                                    eprintln!("Failed to update temp file manager: {}", e);
-                                                }
-
-                                                match StorageFile::GetFileFromPathAsync(&HSTRING::from(path_str)) {
-                                                    Ok(op) => match op.get() {
-                                                        Ok(storage_file) => {
-                                                            if let Ok(item) = storage_file.cast() {
-                                                                storage_items.push(item);
-                                                            }
-                                                        },
-                                                        Err(e) => eprintln!("Failed to get storage file: {}", e),
-                                                    },
-                                                    Err(e) => eprintln!("Failed to get file from path: {}", e),
-                                                }
-                                            },
-                                            Err(e) => eprintln!("Failed to create temp file: {}", e),
-                                        }
-                                    }
-
-                                    if !storage_items.is_empty() {
-                                        let options_items = storage_items.into_iter().map(Some).collect::<Vec<_>>();
-                                        let iterable_items: Result<IIterable<IStorageItem>, _> = options_items.try_into();
-
-                                        match iterable_items {
-                                            Ok(items) => {
-                                                if let Err(e) = data_clone.SetStorageItemsReadOnly(&items) {
-                                                    println!("Failed to set storage items on data package: {}", e);
-                                                }
-                                            },
-                                            Err(e) => {
-                                                println!("Failed to convert Vec to IIterable: {}", e);
-                                            }
-                                        }
-                                    }
-                                    deferral.Complete()?;
-                                    Ok::<(), windows::core::Error>(())
+                                    let storage_file = StorageFile::GetFileFromPathAsync(&HSTRING::from(path_str))
+                                        .map_err(|e| Error::NativeApi(format!("GetFileFromPathAsync failed for temp file: {}", e)))?
+                                        .get()
+                                        .map_err(|e| Error::NativeApi(format!("GetFileFromPathAsync result failed for temp file: {}", e)))?;
+                                    let item: IStorageItem = storage_file.cast()
+                                        .map_err(|e| Error::NativeApi(format!("Failed to cast temp StorageFile to IStorageItem: {}", e)))?;
+                                    storage_items.push(Some(item));
                                 }
+                            }
 
-                            });
+                            if let Some(file_paths) = &options_clone.file_paths {
+                                for path in file_paths {
+                                    if path.is_empty() {
+                                        continue;
+                                    }
+
+                                    // Normalize any forward slashes to Windows backslashes. The
+                                    // frontend may pass absolute paths with either separator, but
+                                    // WinRT's StorageFile API is stricter about backslash separators.
+                                    let normalized_path = path.replace('/', "\\");
+
+                                    let storage_file = StorageFile::GetFileFromPathAsync(&HSTRING::from(normalized_path))
+                                        .map_err(|e| Error::NativeApi(format!("GetFileFromPathAsync failed for '{}': {}", path, e)))?
+                                        .get()
+                                        .map_err(|e| Error::NativeApi(format!("GetFileFromPathAsync result failed for '{}': {}", path, e)))?;
+                                    let item: IStorageItem = storage_file.cast()
+                                        .map_err(|e| Error::NativeApi(format!("Failed to cast StorageFile to IStorageItem for '{}': {}", path, e)))?;
+                                    storage_items.push(Some(item));
+                                }
+                            }
+
+                            if !storage_items.is_empty() {
+                                let iterable_items: IIterable<IStorageItem> = storage_items.try_into()
+                                    .map_err(|e| Error::NativeApi(format!("Failed to convert storage items to IIterable: {}", e)))?;
+
+                                data.SetRequestedOperation(DataPackageOperation::Copy)
+                                    .map_err(|e| Error::NativeApi(format!("Failed to set requested operation: {}", e)))?;
+                                data.SetStorageItems(&iterable_items, true)
+                                    .map_err(|e| Error::NativeApi(format!("Failed to set storage items on DataPackage: {}", e)))?;
+                            }
                         }
 
-                        SHARE_STATE.with(|state| {
-                            if let Some((manager, token)) = state.borrow_mut().take() {
-                                let _ = manager.RemoveDataRequested(token);
-                            }
-                        });
+                        Ok(())
+                    })();
+
+                    if let Err(e) = &handler_result {
+                        error!("[share] DataRequested handler failed: {}", e);
                     }
+                    let _ = tx_for_handler.send(handler_result);
+
+                    SHARE_STATE.with(|state| {
+                        if let Some((manager, token)) = state.borrow_mut().take() {
+                            let _ = manager.RemoveDataRequested(token);
+                        }
+                    });
+
                     Ok(())
                 }
             });
@@ -198,23 +239,26 @@ pub fn share<R: Runtime>(
                 *state.borrow_mut() = Some((dtm, token));
             });
 
-            // Best-effort note: ShowShareUIForWindow doesn't provide a reliable completion callback
-            // for desktop apps. Consider making resolution behavior configurable for end developers
-            // (immediate vs. on-focus vs. delayed).
             unsafe { interop.ShowShareUIForWindow(hwnd) }?;
             Ok(())
         })();
-        tx.send(result).ok();
+
+        if let Err(err) = result {
+            let _ = tx.send(Err(err));
+        }
     }) {
         focus_wait.cancel();
         return Err(e.into());
     }
 
-    let share_result = match rx.recv() {
+    let share_result = match rx.recv_timeout(std::time::Duration::from_secs(30)) {
         Ok(result) => result,
         Err(err) => {
             focus_wait.cancel();
-            return Err(err.into());
+            return Err(Error::NativeApi(format!(
+                "Share timed out waiting for DataRequested event: {}",
+                err
+            )));
         }
     };
     if let Err(err) = share_result {
@@ -268,8 +312,8 @@ fn get_plugin_temp_dir() -> Result<PathBuf, Error> {
     Ok(dir)
 }
 
-/// Creates a secure temporary file from Base64 data.
-fn create_temp_file_for_data(file: &SharedFile) -> Result<PathBuf, Error> {
+/// Creates a secure temporary file from Base64 data inside `temp_dir`.
+fn create_temp_file_for_data(file: &SharedFile, temp_dir: &Path) -> Result<PathBuf, Error> {
     let decoded_bytes = general_purpose::STANDARD
         .decode(&file.data)
         .map_err(|_| Error::InvalidArgs("Invalid Base64 data provided".to_string()))?;
@@ -288,7 +332,6 @@ fn create_temp_file_for_data(file: &SharedFile) -> Result<PathBuf, Error> {
         .to_str()
         .ok_or_else(|| Error::InvalidArgs("File name contains invalid UTF-8".to_string()))?;
 
-    let temp_dir = get_plugin_temp_dir()?;
     let temp_path = temp_dir.join(format!("{}-{}", uuid::Uuid::new_v4(), sanitized_name));
 
     let mut file_handle = OpenOptions::new()
@@ -302,4 +345,68 @@ fn create_temp_file_for_data(file: &SharedFile) -> Result<PathBuf, Error> {
         .map_err(|e| Error::TempFile(format!("Failed to write to temp file: {}", e)))?;
 
     Ok(temp_path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn sample_shared_file() -> SharedFile {
+        SharedFile {
+            data: general_purpose::STANDARD.encode(b"hello world"),
+            name: "hello.txt".to_string(),
+            mime_type: "text/plain".to_string(),
+        }
+    }
+
+    #[test]
+    fn create_temp_file_for_data_creates_expected_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let file = sample_shared_file();
+
+        let path = create_temp_file_for_data(&file, temp_dir.path()).unwrap();
+
+        assert_eq!(path.parent().unwrap(), temp_dir.path());
+        let name = path.file_name().unwrap().to_string_lossy();
+        assert!(name.ends_with("-hello.txt"), "unexpected file name: {name}");
+        assert_eq!(fs::read(&path).unwrap(), b"hello world");
+    }
+
+    #[test]
+    fn create_temp_file_for_data_rejects_invalid_base64() {
+        let temp_dir = TempDir::new().unwrap();
+        let file = SharedFile {
+            data: "not-valid-base64!!!".to_string(),
+            name: "bad.txt".to_string(),
+            mime_type: "text/plain".to_string(),
+        };
+
+        let err = create_temp_file_for_data(&file, temp_dir.path()).unwrap_err();
+
+        assert!(
+            matches!(err, Error::InvalidArgs(_)),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn create_temp_file_for_data_sanitizes_path_traversal_in_name() {
+        let temp_dir = TempDir::new().unwrap();
+        let file = SharedFile {
+            data: general_purpose::STANDARD.encode(b"payload"),
+            name: "../etc/secret.txt".to_string(),
+            mime_type: "text/plain".to_string(),
+        };
+
+        let path = create_temp_file_for_data(&file, temp_dir.path()).unwrap();
+
+        assert_eq!(path.parent().unwrap(), temp_dir.path());
+        let name = path.file_name().unwrap().to_string_lossy();
+        assert!(
+            name.ends_with("-secret.txt"),
+            "unexpected file name: {name}"
+        );
+    }
 }

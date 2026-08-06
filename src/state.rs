@@ -27,7 +27,7 @@ impl PluginTempFileManager {
         let mut files = match self.managed_files.lock() {
             Ok(guard) => guard,
             Err(poisoned) => {
-                eprintln!("Mutex was poisoned during cleanup: {:?}", poisoned);
+                log::error!("Mutex was poisoned during cleanup: {:?}", poisoned);
                 poisoned.into_inner()
             }
         };
@@ -38,7 +38,7 @@ impl PluginTempFileManager {
             }
         }
         if !errors.is_empty() {
-            eprintln!("Errors during cleanup: {:?}", errors);
+            log::error!("Errors during cleanup: {:?}", errors);
         }
     }
 }

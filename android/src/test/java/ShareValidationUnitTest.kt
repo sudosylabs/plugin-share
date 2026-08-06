@@ -51,6 +51,13 @@ class ShareValidationUnitTest {
             ShareValidation.validateShareOptions(options(files = files))
         }
 
+        val paths = (0..ShareValidation.MAX_FILES).map {
+            "/data/file-$it"
+        }
+        assertThrowsSecurity {
+            ShareValidation.validateShareOptions(options(filePaths = paths))
+        }
+
         assertThrowsSecurity {
             ShareValidation.validateShareOptions(options(text = "a".repeat(ShareValidation.MAX_TEXT_BYTES + 1)))
         }
@@ -60,6 +67,12 @@ class ShareValidationUnitTest {
                 options(files = listOf(file("a".repeat(ShareValidation.MAX_FILE_NAME_BYTES + 1), "aGVsbG8=")))
             )
         }
+
+        assertThrowsSecurity {
+            ShareValidation.validateShareOptions(
+                options(filePaths = listOf("/path/".repeat(ShareValidation.MAX_FILE_PATH_BYTES)))
+            )
+        }
     }
 
     private fun options(
@@ -67,12 +80,14 @@ class ShareValidationUnitTest {
         title: String? = null,
         url: String? = null,
         files: List<SharedFile>? = null,
+        filePaths: List<String>? = null,
     ): ShareOptions {
         return ShareOptions().apply {
             this.text = text
             this.title = title
             this.url = url
             this.files = files
+            this.filePaths = filePaths
         }
     }
 
