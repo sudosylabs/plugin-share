@@ -5,6 +5,9 @@ on:
   push:
     tags:
       - "v*.*.*"
+  # Allows a missed or suppressed tag event to be recovered without rewriting
+  # an already-published release tag. Run this workflow against the tag ref.
+  workflow_dispatch:
 
 jobs:
   publish-crate-dry-run:
