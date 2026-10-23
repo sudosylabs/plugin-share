@@ -251,7 +251,7 @@ If a `filePath` is outside any declared root, the plugin copies it to its cache 
 
 ## Upgrading from 1.0.0-rc.4
 
-The version after `1.0.0-rc.4` contains breaking Rust changes.
+`1.0.0-rc.5` contains breaking Rust changes.
 
 - **Rust:** `ShareOptions` includes `subject: Option<String>`. Struct literals must set `subject: None` or `Some(...)` or they will not compile.
 - **JavaScript / TypeScript:** `subject` is optional on `ShareData`; existing callers that omit it are unchanged.
