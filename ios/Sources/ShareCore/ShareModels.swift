@@ -27,14 +27,16 @@ public struct SharedFile: Decodable {
 public struct ShareOptions: Decodable {
     public var text: String?
     public var title: String?
+    public var subject: String?
     public var url: String?
     public var files: [SharedFile]?
     public var filePaths: [String]?
     public var anchor: ShareAnchor?
 
-    public init(text: String? = nil, title: String? = nil, url: String? = nil, files: [SharedFile]? = nil, filePaths: [String]? = nil, anchor: ShareAnchor? = nil) {
+    public init(text: String? = nil, title: String? = nil, subject: String? = nil, url: String? = nil, files: [SharedFile]? = nil, filePaths: [String]? = nil, anchor: ShareAnchor? = nil) {
         self.text = text
         self.title = title
+        self.subject = subject
         self.url = url
         self.files = files
         self.filePaths = filePaths

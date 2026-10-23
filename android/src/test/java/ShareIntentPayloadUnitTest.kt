@@ -73,14 +73,50 @@ class ShareIntentPayloadUnitTest {
         assertNull(payload.body)
     }
 
+    @Test
+    fun explicitSubjectIsPreserved() {
+        val payload = ShareIntentPayload.from(
+            options(
+                title = "Chooser title",
+                subject = "report.pdf",
+            )
+        )
+
+        assertEquals("Chooser title", payload.title)
+        assertEquals("report.pdf", payload.subject)
+        assertEquals("report.pdf", payload.intentSubject())
+    }
+
+    @Test
+    fun intentSubjectFallsBackToTitleWhenSubjectAbsent() {
+        val payload = ShareIntentPayload.from(options(title = "Mail subject"))
+
+        assertEquals("Mail subject", payload.intentSubject())
+    }
+
+    @Test
+    fun emptySubjectIsTreatedAsAbsent() {
+        val payload = ShareIntentPayload.from(
+            options(
+                title = "Chooser title",
+                subject = "",
+            )
+        )
+
+        assertNull(payload.subject)
+        assertEquals("Chooser title", payload.intentSubject())
+    }
+
     private fun options(
         text: String? = null,
         title: String? = null,
+        subject: String? = null,
         url: String? = null,
     ): ShareOptions {
         return ShareOptions().apply {
             this.text = text
             this.title = title
+            this.subject = subject
             this.url = url
         }
     }

@@ -15,6 +15,7 @@ object ShareValidation {
     fun validateShareOptions(args: ShareOptions) {
         validateStringLength("text", args.text, MAX_TEXT_BYTES)
         validateStringLength("title", args.title, MAX_TITLE_BYTES)
+        validateStringLength("subject", args.subject, MAX_TITLE_BYTES)
         validateStringLength("url", args.url, MAX_URL_BYTES)
 
         args.url?.let {

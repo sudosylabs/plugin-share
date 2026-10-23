@@ -41,6 +41,7 @@ class SharedFile {
 class ShareOptions {
     var text: String? = null
     var title: String? = null
+    var subject: String? = null
     var url: String? = null
     var files: List<SharedFile>? = null
     /** A list of local file paths to share directly from disk, preserving the original filename. */
@@ -246,6 +247,8 @@ class SharePlugin(private val activity: Activity): Plugin(activity) {
         }
         payload.title?.let {
             shareIntent.putExtra(Intent.EXTRA_TITLE, it)
+        }
+        payload.intentSubject()?.let {
             shareIntent.putExtra(Intent.EXTRA_SUBJECT, it)
         }
 

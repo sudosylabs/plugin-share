@@ -41,13 +41,18 @@ describe('payload normalization', () => {
 		tauriCoreMock.invoke.mockResolvedValue(undefined)
 	})
 
-	it('drops empty text, title and url before invoking share', async () => {
+	it('drops empty text, title, subject and url before invoking share', async () => {
 		const { share } = await import('../../guest-js/index')
 
-		await share({ text: 'hello', title: '', url: '' })
+		await share({ text: 'hello', title: '', subject: '', url: '' })
 
 		const [, args] = tauriCoreMock.invoke.mock.calls[0]
-		expect(args.options).toStrictEqual({ text: 'hello', title: undefined, url: undefined })
+		expect(args.options).toStrictEqual({
+			text: 'hello',
+			title: undefined,
+			subject: undefined,
+			url: undefined,
+		})
 	})
 
 	it('rejects non-finite anchor values', async () => {

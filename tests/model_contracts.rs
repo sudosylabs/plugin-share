@@ -7,6 +7,7 @@ fn public_model_validation_accepts_local_file_bytes_without_url() {
     let options = ShareOptions {
         text: None,
         title: Some("Local file".to_string()),
+        subject: None,
         url: None,
         files: Some(vec![SharedFile {
             data: "aGVsbG8=".to_string(),
@@ -33,6 +34,7 @@ fn public_model_validation_rejects_non_web_url_schemes() {
         assert!(ShareOptions {
             text: None,
             title: None,
+            subject: None,
             url: Some(url.to_string()),
             files: None,
             file_paths: None,
@@ -49,6 +51,7 @@ fn public_model_validation_enforces_limits() {
     assert!(ShareOptions {
         text: Some(oversized_text),
         title: None,
+        subject: None,
         url: None,
         files: None,
         file_paths: None,
@@ -61,6 +64,7 @@ fn public_model_validation_enforces_limits() {
     assert!(ShareOptions {
         text: None,
         title: None,
+        subject: None,
         url: Some(oversized_url),
         files: None,
         file_paths: None,
@@ -79,6 +83,7 @@ fn public_model_validation_enforces_limits() {
     assert!(ShareOptions {
         text: None,
         title: None,
+        subject: None,
         url: None,
         files: Some(files),
         file_paths: None,
@@ -90,6 +95,7 @@ fn public_model_validation_enforces_limits() {
     assert!(ShareOptions {
         text: None,
         title: None,
+        subject: None,
         url: None,
         files: Some(vec![SharedFile {
             data: "aGVsbG8=".to_string(),

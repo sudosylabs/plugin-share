@@ -20,8 +20,8 @@ For release safety, share payloads are bounded on both the JavaScript and native
 - A single share request may include up to 16 files (`files` and `filePaths` combined).
 - Each file in `files` may be up to 50 MiB, and all of `files` together up to 100 MiB. Files shared by path are not size-limited.
 - Each `filePaths` entry must be an absolute path to an existing file.
-- Text is limited to 64 KiB, titles to 1 KiB, URLs to 4 KiB, file paths to 4 KiB, and file names/MIME types to 255 bytes.
-- Empty `text`, `title` and `url` strings are treated as if they were not provided.
+- Text is limited to 64 KiB, titles and subjects to 1 KiB, URLs to 4 KiB, file paths to 4 KiB, and file names/MIME types to 255 bytes.
+- Empty `text`, `title`, `subject`, and `url` strings are treated as if they were not provided.
 
 ## Installation
 
@@ -71,7 +71,7 @@ The frontend API is designed to closely resemble the Web Share API, making it in
 
 2. **Sharing Content**
 
-   Use the `share()` function with a `ShareData` object to trigger the native dialog. The `files` field requires an array of `File` objects, which the plugin automatically handles by converting them to Base64 and managing their lifecycle in the backend. For content that already exists on disk, use `filePaths` to share the file directly while preserving its original filename. On Android, paths inside a configured `FileProvider` root are shared as-is; paths outside a declared root are copied to the plugin's cache share directory and cleaned up automatically. At least one of `text`, `url`, a non-empty `files` array, or a non-empty `filePaths` array must be provided.
+   Use the `share()` function with a `ShareData` object to trigger the native dialog. The `files` field requires an array of `File` objects, which the plugin automatically handles by converting them to Base64 and managing their lifecycle in the backend. For content that already exists on disk, use `filePaths` to share the file directly while preserving its original filename. On Android, paths inside a configured `FileProvider` root are shared as-is; paths outside a declared root are copied to the plugin's cache share directory and cleaned up automatically. You may also set optional `subject` (primarily for Android; see the platform table below). At least one of `text`, `url`, a non-empty `files` array, or a non-empty `filePaths` array must be provided.
    **When the promise resolves.** It resolves once the share UI is closed. Platforms do not report reliably whether the user actually shared or cancelled, so a dismissed dialog also resolves. It rejects for invalid input, missing files, or a native error.
 
    - **Android and Windows:** resolves when the app regains focus after the share UI closes (best-effort).
@@ -85,8 +85,11 @@ The frontend API is designed to closely resemble the Web Share API, making it in
    | | Android | iOS | macOS | Windows |
    | --- | --- | --- | --- | --- |
    | `text` + `url` | Sent together as `text\nurl` | Separate text and URL items | Separate text and URL items | Text plus a web link; text-only targets also see the URL |
-   | `title` | Chooser title and subject | Subject (for example, the Mail subject) | Subject | Share UI title |
+   | `title` | Chooser title (`EXTRA_TITLE`) | Subject (for example, the Mail subject) | Subject | Share UI title |
+   | `subject` | `EXTRA_SUBJECT` (falls back to `title` when omitted); use for targets such as Google Drive default file name | No effect | No effect | No effect |
    | `text`/`url` alongside files | Included | Included | Included | Included |
+
+   On Android, some share targets (for example Google Drive) use `EXTRA_SUBJECT` as the default file name. Set `subject` to the filename you want saved (often `file.name` or the basename of a `filePaths` entry) while keeping `title` as the human-readable chooser label. `EXTRA_SUBJECT` is a single string; it does not apply per file when sharing multiple files. The system chooser label comes from `title` only (`Intent.createChooser`); setting `subject` without `title` does not set the chooser title.
 
    On Windows, when no `title` is given, the first file name (or "Shared content") is used, because Windows requires a title.
 
@@ -230,6 +233,7 @@ If a `filePath` is outside any declared root, the plugin copies it to its cache 
        let share_options = ShareOptions {
            text: Some("Hello from Rust!".to_string()),
            title: Some("Rust Share".to_string()),
+           subject: None,
            url: None,
            files: None,
            file_paths: None,
@@ -244,6 +248,15 @@ If a `filePath` is outside any declared root, the plugin copies it to its cache 
        .map_err(|e| e.to_string())
    }
    ```
+
+## Upgrading from 1.0.0-rc.4
+
+The version after `1.0.0-rc.4` contains breaking Rust changes.
+
+- **Rust:** `ShareOptions` includes `subject: Option<String>`. Struct literals must set `subject: None` or `Some(...)` or they will not compile.
+- **JavaScript / TypeScript:** `subject` is optional on `ShareData`; existing callers that omit it are unchanged.
+- **Android file shares:** When the chooser label must differ from the name a target uses (for example Google Drive), set `subject` to the desired filename (`file.name` or a `filePaths` basename) and use `title` for the chooser label (see the platform table above).
+- **Behavior:** If you only set `title`, Android still sets `EXTRA_SUBJECT` from `title` as before.
 
 ## Testing
 

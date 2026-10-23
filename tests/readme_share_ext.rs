@@ -12,6 +12,7 @@ async fn custom_share_command<R: Runtime>(
     let share_options = ShareOptions {
         text: Some("Hello from Rust!".to_string()),
         title: Some("Rust Share".to_string()),
+        subject: None,
         url: None,
         files: None,
         file_paths: None,

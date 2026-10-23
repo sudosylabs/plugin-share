@@ -17,6 +17,9 @@ public func validateShareOptions(_ args: ShareOptions) -> String? {
     if let error = validateStringLength("title", args.title, maxBytes: maxTitleBytes) {
         return error
     }
+    if let error = validateStringLength("subject", args.subject, maxBytes: maxTitleBytes) {
+        return error
+    }
     if let error = validateStringLength("url", args.url, maxBytes: maxURLBytes) {
         return error
     }

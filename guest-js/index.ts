@@ -49,6 +49,13 @@ export interface ShareData {
   text?: string;
   /** Optional title describing the shared content. */
   title?: string;
+  /**
+   * Optional subject separate from `title`. On Android this is required when `title` must
+   * differ from the value share targets use as a file name or subject line: it maps to
+   * `EXTRA_SUBJECT` (e.g. Google Drive's default file name). If omitted on Android,
+   * `EXTRA_SUBJECT` falls back to `title`. Other platforms ignore this field.
+   */
+  subject?: string;
   /** Optional URL to be shared. */
   url?: string;
   /**
@@ -104,6 +111,9 @@ function validateShareData(data: ShareData): void {
   }
   if (data.title && byteLength(data.title) > MAX_TITLE_BYTES) {
     throw new TypeError(`title exceeds the maximum length of ${MAX_TITLE_BYTES} bytes.`);
+  }
+  if (data.subject && byteLength(data.subject) > MAX_TITLE_BYTES) {
+    throw new TypeError(`subject exceeds the maximum length of ${MAX_TITLE_BYTES} bytes.`);
   }
   if (data.url) {
     if (byteLength(data.url) > MAX_URL_BYTES) {
@@ -168,6 +178,7 @@ function validateShareData(data: ShareData): void {
 interface SharePayload {
   text?: string;
   title?: string;
+  subject?: string;
   url?: string;
   files?: { data: string; name: string; mimeType: string }[];
   filePaths?: string[];
@@ -280,6 +291,7 @@ export async function share(data: ShareData): Promise<void> {
   const payload: SharePayload = {
     text: data.text || undefined,
     title: data.title || undefined,
+    subject: data.subject || undefined,
     url: data.url || undefined,
   };
 

@@ -84,6 +84,7 @@ document.querySelector('#share-file').addEventListener('click', async () => {
 	try {
 		await share({
 			title: 'Selected local files',
+			subject: files.length === 1 ? files[0].name : undefined,
 			text: 'Sharing local file content through temporary native files.',
 			files,
 		})

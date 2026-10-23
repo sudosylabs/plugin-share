@@ -33,6 +33,7 @@ final class ShareValidationTests: XCTestCase {
 
         XCTAssertNotNil(validateShareOptions(options(files: files)))
         XCTAssertNotNil(validateShareOptions(options(text: String(repeating: "a", count: maxTextBytes + 1))))
+        XCTAssertNotNil(validateShareOptions(options(subject: String(repeating: "a", count: maxTitleBytes + 1))))
         XCTAssertNotNil(validateShareOptions(options(files: [
             SharedFile(
                 data: "aGVsbG8=",
@@ -45,9 +46,10 @@ final class ShareValidationTests: XCTestCase {
     private func options(
         text: String? = nil,
         title: String? = nil,
+        subject: String? = nil,
         url: String? = nil,
         files: [SharedFile]? = nil
     ) -> ShareOptions {
-        ShareOptions(text: text, title: title, url: url, files: files)
+        ShareOptions(text: text, title: title, subject: subject, url: url, files: files)
     }
 }

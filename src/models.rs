@@ -70,8 +70,17 @@ pub struct SharedFile {
 pub struct ShareOptions {
     /// Optional text content to include in the share dialog.
     pub text: Option<String>,
-    /// Optional title for the share dialog, used as the subject where the platform supports one.
+    /// Optional title for the share UI. On Android this is the chooser label (`EXTRA_TITLE`);
+    /// on iOS, macOS, and Windows it is also used as the subject or share title where those
+    /// platforms support one. For Android `EXTRA_SUBJECT` (for example a Drive default file name),
+    /// use [`ShareOptions::subject`] instead; when `subject` is omitted on Android, `EXTRA_SUBJECT`
+    /// falls back to this field.
     pub title: Option<String>,
+    /// Optional subject separate from [`ShareOptions::title`]. Required for correct Android
+    /// behavior when `title` must stay a human-readable chooser label: maps to `Intent.EXTRA_SUBJECT`
+    /// (for example Google Drive's default file name). When omitted on Android, `EXTRA_SUBJECT`
+    /// falls back to `title`. Other platforms ignore this field.
+    pub subject: Option<String>,
     /// Optional URL to include in the share dialog.
     pub url: Option<String>,
     /// A list of files to share, each represented by a `SharedFile` struct.
@@ -84,13 +93,14 @@ pub struct ShareOptions {
 }
 
 impl ShareOptions {
-    /// Returns a copy where empty `text`, `title` and `url` values are treated as absent.
+    /// Returns a copy where empty `text`, `title`, `subject` and `url` values are treated as absent.
     pub fn normalized(mut self) -> Self {
         fn non_empty(value: Option<String>) -> Option<String> {
             value.filter(|value| !value.is_empty())
         }
         self.text = non_empty(self.text);
         self.title = non_empty(self.title);
+        self.subject = non_empty(self.subject);
         self.url = non_empty(self.url);
         self
     }
@@ -122,6 +132,7 @@ impl ShareOptions {
     pub fn validate(&self) -> Result<(), Error> {
         validate_optional_string("text", self.text.as_deref(), MAX_TEXT_BYTES)?;
         validate_optional_string("title", self.title.as_deref(), MAX_TITLE_BYTES)?;
+        validate_optional_string("subject", self.subject.as_deref(), MAX_TITLE_BYTES)?;
 
         if let Some(url) = self.url.as_deref().filter(|value| !value.is_empty()) {
             validate_optional_string("url", Some(url), MAX_URL_BYTES)?;
@@ -313,7 +324,7 @@ pub struct CanShareResult {
 mod tests {
     use super::{
         estimate_base64_decoded_len, validate_web_url, ShareAnchor, ShareOptions, SharedFile,
-        MAX_FILES, MAX_TEXT_BYTES,
+        MAX_FILES, MAX_TEXT_BYTES, MAX_TITLE_BYTES,
     };
 
     /// Shared with the TypeScript, Kotlin and Swift test suites.
@@ -361,13 +372,19 @@ mod tests {
         let data = ShareOptions {
             text: Some(String::new()),
             title: Some(String::new()),
+            subject: Some(String::new()),
             url: Some(String::new()),
             files: None,
             file_paths: None,
             anchor: None,
         }
         .normalized();
-        assert!(data.text.is_none() && data.title.is_none() && data.url.is_none());
+        assert!(
+            data.text.is_none()
+                && data.title.is_none()
+                && data.subject.is_none()
+                && data.url.is_none()
+        );
     }
 
     #[test]
@@ -401,6 +418,7 @@ mod tests {
         ShareOptions {
             text: text.map(ToString::to_string),
             title: None,
+            subject: None,
             url: url.map(ToString::to_string),
             files,
             file_paths: None,
@@ -472,6 +490,20 @@ mod tests {
         assert!(ShareOptions {
             text: Some(oversized_text),
             title: None,
+            subject: None,
+            url: None,
+            files: None,
+            file_paths: None,
+            anchor: None,
+        }
+        .validate()
+        .is_err());
+
+        let oversized_subject = "a".repeat(MAX_TITLE_BYTES + 1);
+        assert!(ShareOptions {
+            text: None,
+            title: None,
+            subject: Some(oversized_subject),
             url: None,
             files: None,
             file_paths: None,
